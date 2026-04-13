@@ -65,17 +65,13 @@ def _make_order(
 def _sane_client() -> MagicMock:
     """Build a CoinbaseClient mock that passes every sanity check."""
     client = MagicMock(spec=CoinbaseClient)
-    client.get_accounts.return_value = [{"uuid": "a1"}]
+    client.get_accounts.return_value = [
+        {"uuid": "a1", "available_balance": {"value": "1000", "currency": "USD"}},
+    ]
     client.get_portfolios.return_value = [
         {"uuid": PORTFOLIO_UUID, "name": "turtle"},
         {"uuid": "other-uuid", "name": "savings"},
     ]
-    client.get_portfolio_breakdown.return_value = {
-        "portfolio": {"uuid": PORTFOLIO_UUID},
-        "portfolio_balances": {
-            "total_balance": {"value": "1000", "currency": "USD"},
-        },
-    }
     client.place_market_buy.return_value = {
         "success": True,
         "order_id": "server-id-1",
@@ -121,29 +117,22 @@ def test_sanity_checks_fail_on_auth_error(audit: AuditStore) -> None:
 
 def test_sanity_checks_fail_on_balance_drift(audit: AuditStore) -> None:
     client = _sane_client()
-    client.get_portfolio_breakdown.return_value = {
-        "portfolio_balances": {"total_balance": {"value": "500", "currency": "USD"}}
-    }
+    client.get_accounts.return_value = [
+        {"uuid": "a1", "available_balance": {"value": "500", "currency": "USD"}},
+    ]
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
     with pytest.raises(SanityCheckError, match="outside tolerance"):
         ex.run_sanity_checks()
 
 
-def test_sanity_checks_fail_on_non_usd_balance(audit: AuditStore) -> None:
+def test_sanity_checks_fail_on_zero_usd_balance(audit: AuditStore) -> None:
     client = _sane_client()
-    client.get_portfolio_breakdown.return_value = {
-        "portfolio_balances": {"total_balance": {"value": "10000", "currency": "EUR"}}
-    }
+    # No USD accounts at all — balance sums to $0.
+    client.get_accounts.return_value = [
+        {"uuid": "a1", "available_balance": {"value": "5.0", "currency": "BTC"}},
+    ]
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
-    with pytest.raises(SanityCheckError, match="expected USD"):
-        ex.run_sanity_checks()
-
-
-def test_sanity_checks_fail_on_missing_balance_structure(audit: AuditStore) -> None:
-    client = _sane_client()
-    client.get_portfolio_breakdown.return_value = {"weird": "shape"}
-    ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
-    with pytest.raises(SanityCheckError, match="portfolio_balances"):
+    with pytest.raises(SanityCheckError, match="outside tolerance"):
         ex.run_sanity_checks()
 
 

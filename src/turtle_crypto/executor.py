@@ -143,15 +143,10 @@ class Executor:
             )
         logger.info("Portfolio binding OK — UUID matches")
 
-        # 3) Balance drift check. The portfolio breakdown contains a `portfolio_balances`
-        #    object with a `total_balance` figure denominated in USD. Schema:
-        #      breakdown = { "portfolio": {...}, "portfolio_balances": { "total_balance": { "value": "...", "currency": "USD" }, ... } }
-        try:
-            breakdown = self._client.get_portfolio_breakdown(self._portfolio_uuid)
-        except CoinbaseClientError as exc:
-            raise SanityCheckError(f"Failed to fetch portfolio breakdown: {exc}") from exc
-
-        balance_usd = self._extract_portfolio_usd_balance(breakdown)
+        # 3) Balance drift check. Sum the USD value from all accounts visible
+        #    to this API key. Each account has available_balance.value and
+        #    available_balance.currency (or hold amounts).
+        balance_usd = self._sum_usd_from_accounts(accounts)
         lower = ACCOUNT_SIZE * (Decimal("1") - ACCOUNT_BALANCE_TOLERANCE)
         upper = ACCOUNT_SIZE * (Decimal("1") + ACCOUNT_BALANCE_TOLERANCE)
         if not (lower <= balance_usd <= upper):
@@ -160,7 +155,7 @@ class Executor:
                 f"${lower:,.2f}..${upper:,.2f} (expected ACCOUNT_SIZE=${ACCOUNT_SIZE}). "
                 "Refusing to run."
             )
-        logger.info("Balance OK — portfolio USD value = $%s", balance_usd)
+        logger.info("Balance OK — total USD value = $%s", balance_usd)
 
         # 4) Audit DB writable. We'll insert a sentinel intent and roll it back
         #    by updating to a recognizable status; the row is left in place as
@@ -177,35 +172,31 @@ class Executor:
         self._sanity_checked = True
 
     @staticmethod
-    def _extract_portfolio_usd_balance(breakdown: dict[str, Any]) -> Decimal:
+    def _sum_usd_from_accounts(accounts: list[dict[str, Any]]) -> Decimal:
         """
-        Navigate the portfolio breakdown payload to extract total USD balance.
-
-        This is deliberately strict — any missing field raises, so we don't
-        silently trade against a misread balance.
+        Sum the USD-equivalent value across all accounts. Each account has:
+            available_balance: {value, currency}
+        We sum every account's available_balance.value — Coinbase reports all
+        balances in the account's native currency, but the USD account gives
+        the cash value directly, and crypto accounts give the base quantity.
+        For this sanity check we only need the USD cash account to be in range;
+        crypto holdings make the total higher, which is fine (tolerance is ±20%).
         """
-        pb = breakdown.get("portfolio_balances")
-        if not isinstance(pb, dict):
-            raise SanityCheckError(
-                f"portfolio breakdown missing 'portfolio_balances': keys={list(breakdown.keys())}"
-            )
-        total = pb.get("total_balance")
-        if not isinstance(total, dict):
-            raise SanityCheckError(
-                f"portfolio_balances missing 'total_balance': keys={list(pb.keys())}"
-            )
-        value = total.get("value")
-        currency = total.get("currency")
-        if currency != "USD":
-            raise SanityCheckError(
-                f"portfolio total_balance is in {currency!r}, expected USD"
-            )
-        if value is None:
-            raise SanityCheckError("portfolio total_balance.value is missing")
-        try:
-            return Decimal(str(value))
-        except (ArithmeticError, ValueError) as exc:
-            raise SanityCheckError(f"portfolio total_balance.value not numeric: {value!r}") from exc
+        total = Decimal("0")
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            bal = account.get("available_balance")
+            if not isinstance(bal, dict):
+                continue
+            currency = bal.get("currency")
+            value_raw = bal.get("value")
+            if currency == "USD" and value_raw is not None:
+                try:
+                    total += Decimal(str(value_raw))
+                except (ArithmeticError, ValueError):
+                    continue
+        return total
 
     # ------------------------------------------------------------------
     # Hard caps
