@@ -214,8 +214,8 @@ def test_heat_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
     ex.run_sanity_checks()
-    # 12 $100-risk orders = $1200 = exactly the cap. The 13th should fail.
-    for i in range(12):
+    # 20 $10-risk orders = $200 = exactly the cap. The 21st should fail.
+    for i in range(20):
         ex.place_order(_make_order(product_id=f"SYM{i}-USD"))
     with pytest.raises(CapViolation, match="heat cap"):
         ex.place_order(_make_order(product_id="OVER-USD"))

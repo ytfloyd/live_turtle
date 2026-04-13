@@ -388,10 +388,10 @@ def test_build_sheet_heat_aggregation() -> None:
 
 
 def test_build_sheet_heat_cap_breach_reports_scale_down() -> None:
-    # Construct 20 fixture pairs each with ~1% risk → 20% total → breach of 12%.
+    # Construct 30 fixture pairs each with ~1% risk → 30% total → breach of 20%.
     rows = []
     details = {}
-    for i in range(20):
+    for i in range(30):
         pid = f"SYM{i}-USD"
         rows.append(
             {

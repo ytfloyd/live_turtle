@@ -78,11 +78,9 @@ STOP_LOSS_ATR_MULTIPLE: Decimal = Decimal("2")
 MAX_UNITS_PER_MARKET: int = 4
 
 # Maximum total portfolio heat (sum of risk across open positions), as a
-# fraction of account size. 12% of $1k = $120.
-MAX_PORTFOLIO_HEAT: Decimal = Decimal("0.12")
+# fraction of account size. 20% of $1k = $200.
+MAX_PORTFOLIO_HEAT: Decimal = Decimal("0.20")
 
-# Hard cap on notional per single order, in USD. Prevents a single mispriced
-# order from moving more than 15% of the account.
 # Hard cap on notional per single order, in USD. Prevents a single mispriced
 # order from moving more than 15% of the account.
 MAX_NOTIONAL_PER_ORDER_USD: Decimal = Decimal("150")
@@ -119,7 +117,7 @@ STOP_LIMIT_SLIPPAGE: Decimal = Decimal("0.005")
 
 MAX_ORDER_NOTIONAL_USD: Decimal = Decimal("150")
 MAX_DAILY_ORDERS: int = 15
-MAX_PORTFOLIO_HEAT_USD: Decimal = Decimal("120")
+MAX_PORTFOLIO_HEAT_USD: Decimal = Decimal("200")
 
 # ---------------------------------------------------------------------------
 # Scanner concurrency
