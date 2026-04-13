@@ -99,6 +99,7 @@ class TradeOrder:
     stop_limit_price: Optional[Decimal]
     classification: str
     priority: int
+    rank_score: float
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,7 @@ def build_trade_sheet(
         ret_55d = Decimal(str(series["return_55d"]))
         vol_usd = Decimal(str(series["vol_24h_usd"]))
         s1_high = Decimal(str(series["s1_high"]))
+        rank_score = float(series.get("rank_score", 0.0))
 
         base_row = TradeSheetRow(
             product_id=pid,
@@ -415,6 +417,7 @@ def build_trade_sheet(
                 stop_limit_price=None,
                 classification=classification.label,
                 priority=classification.priority,
+                rank_score=rank_score,
             )
         elif classification.order_type == "STOP_LIMIT_BUY":
             # Trigger on the 20-day high (S1 high).
@@ -435,6 +438,7 @@ def build_trade_sheet(
                 stop_limit_price=stop_limit_price,
                 classification=classification.label,
                 priority=classification.priority,
+                rank_score=rank_score,
             )
         else:
             rows.append(base_row)
@@ -453,9 +457,9 @@ def build_trade_sheet(
         elif r.order.order_type == "STOP_LIMIT_BUY":
             resting_orders.append(r.order)
 
-    # Sort each list by priority (ascending = best first) then notional desc.
-    active_orders.sort(key=lambda o: (o.priority, -float(o.notional_usd)))
-    resting_orders.sort(key=lambda o: (o.priority, -float(o.notional_usd)))
+    # Sort by rank_score descending — strongest signals first.
+    active_orders.sort(key=lambda o: -o.rank_score)
+    resting_orders.sort(key=lambda o: -o.rank_score)
 
     total_notional = sum((o.notional_usd for o in active_orders + resting_orders), Decimal("0"))
     total_risk = sum((o.risk_usd for o in active_orders + resting_orders), Decimal("0"))
@@ -509,12 +513,13 @@ def print_trade_sheet(sheet: TradeSheet) -> None:
                     f"${o.notional_usd:,.2f}",
                     f"${o.risk_usd:,.2f}",
                     f"{(o.notional_usd / ACCOUNT_SIZE * 100):.1f}%",
+                    f"{o.rank_score:.1f}",
                 ]
             )
         print(
             tabulate(
                 table,
-                headers=["asset", "class", "size", "entry", "stop (2N)", "notional", "risk", "%acct"],
+                headers=["asset", "class", "size", "entry", "stop (2N)", "notional", "risk", "%acct", "rank"],
                 tablefmt="simple",
             )
         )
@@ -535,12 +540,13 @@ def print_trade_sheet(sheet: TradeSheet) -> None:
                     f"${o.stop_loss_price:,.4f}",
                     f"${o.notional_usd:,.2f}",
                     f"${o.risk_usd:,.2f}",
+                    f"{o.rank_score:.1f}",
                 ]
             )
         print(
             tabulate(
                 table,
-                headers=["asset", "class", "size", "trigger", "limit", "stop (2N)", "notional", "risk"],
+                headers=["asset", "class", "size", "trigger", "limit", "stop (2N)", "notional", "risk", "rank"],
                 tablefmt="simple",
             )
         )

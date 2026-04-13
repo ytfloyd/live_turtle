@@ -58,6 +58,7 @@ def _make_order(
         stop_limit_price=(entry_price * Decimal("1.005")) if order_type == "STOP_LIMIT_BUY" else None,
         classification="S2 LONG",
         priority=1,
+        rank_score=10.0,
     )
 
 

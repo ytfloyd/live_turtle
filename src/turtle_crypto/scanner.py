@@ -68,6 +68,7 @@ SCANNER_COLUMNS: list[str] = [
     "s1_signal",
     "s2_signal",
     "return_55d",
+    "rank_score",
 ]
 
 
@@ -380,6 +381,55 @@ def compute_turtle_stats(df: pd.DataFrame) -> dict[str, float] | None:
     }
 
 
+def compute_rank_score(stats: dict[str, float], vol_24h_usd: float) -> float:
+    """
+    Composite ranking score for prioritizing which breakouts to trade when
+    more signals fire than the heat cap allows.
+
+    score = breakout_strength × trend_confirmation × liquidity
+
+    breakout_strength:
+        S2 LONG:  2.0 + (close - s2_high) / ATR   (strongest tier, ≥ 2.0)
+        S1 LONG:  1.0 + (close - s1_high) / ATR   (mid tier, 1.0–2.0)
+        neither:  s1_channel_pct / 100             (approaching, 0–1.0)
+
+    trend_confirmation:
+        1.0 + max(return_55d, 0)   (multiplicative; neutral at 1.0, never < 1.0)
+
+    liquidity:
+        log10(vol_24h_usd)   (rewards liquid markets; ~5 for $100k, ~9 for $1B)
+    """
+    import math
+
+    close = stats["close"]
+    atr = stats["atr"]
+    s1_high = stats["s1_high"]
+    s2_high = stats["s2_high"]
+    s1_signal = stats["s1_signal"]
+    s2_signal = stats["s2_signal"]
+    s1_channel_pct = stats["s1_channel_pct"]
+    return_55d = stats["return_55d"]
+
+    if atr <= 0 or close <= 0:
+        return 0.0
+
+    # Component 1: breakout strength
+    if s2_signal == "LONG":
+        breakout = 2.0 + (close - s2_high) / atr
+    elif s1_signal == "LONG":
+        breakout = 1.0 + (close - s1_high) / atr
+    else:
+        breakout = s1_channel_pct / 100.0
+
+    # Component 2: trend confirmation (only rewards positive momentum)
+    trend = 1.0 + max(return_55d, 0.0)
+
+    # Component 3: liquidity
+    liquidity = math.log10(max(vol_24h_usd, 1.0))
+
+    return breakout * trend * liquidity
+
+
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
@@ -419,6 +469,7 @@ def build_scanner_dataframe(
                 "s1_signal": stats["s1_signal"],
                 "s2_signal": stats["s2_signal"],
                 "return_55d": stats["return_55d"],
+                "rank_score": compute_rank_score(stats, vol_24h_usd),
             }
         )
 
@@ -455,20 +506,20 @@ def print_scanner_tables(df: pd.DataFrame) -> None:
         print("Scanner produced no rows.")
         return
 
-    s2_breakouts = df[df["s2_signal"] == "LONG"].sort_values("s2_channel_pct", ascending=False)
+    s2_breakouts = df[df["s2_signal"] == "LONG"].sort_values("rank_score", ascending=False)
     s2_ids = set(s2_breakouts["product_id"])
     s1_breakouts = df[(df["s1_signal"] == "LONG") & (~df["product_id"].isin(s2_ids))].sort_values(
-        "s1_channel_pct", ascending=False
+        "rank_score", ascending=False
     )
     approaching = df[
         (df["s1_signal"] != "LONG")
         & (df["s1_channel_pct"] >= 75.0)
         & (df["s1_channel_pct"] < 100.0)
-    ].sort_values("s1_channel_pct", ascending=False)
+    ].sort_values("rank_score", ascending=False)
     exits = df[(df["s1_signal"] == "EXIT") | (df["s2_signal"] == "EXIT")]
 
-    top50 = df.sort_values("s1_channel_pct", ascending=False).head(50)
-    bottom20 = df.sort_values("s1_channel_pct", ascending=True).head(20)
+    top50 = df.sort_values("rank_score", ascending=False).head(50)
+    bottom20 = df.sort_values("rank_score", ascending=True).head(20)
 
     def _fmt(sub: pd.DataFrame) -> str:
         if sub.empty:
@@ -484,6 +535,7 @@ def print_scanner_tables(df: pd.DataFrame) -> None:
                 "s2_signal",
                 "return_55d",
                 "vol_24h_usd",
+                "rank_score",
             ]
         ].copy()
         view["return_55d"] = view["return_55d"] * 100.0
@@ -499,6 +551,7 @@ def print_scanner_tables(df: pd.DataFrame) -> None:
                 "s2",
                 "55d%",
                 "vol24h$",
+                "rank",
             ],
             floatfmt=(
                 "",
@@ -510,6 +563,7 @@ def print_scanner_tables(df: pd.DataFrame) -> None:
                 "",
                 ".1f",
                 ",.0f",
+                ".1f",
             ),
             tablefmt="simple",
         )

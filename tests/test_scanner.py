@@ -201,3 +201,102 @@ def test_non_429_error_not_retried(
     result = fetch_all_candles(client, products, workers=1)
     assert "BTC-USD" not in result
     assert mock_fetch.call_count == 1  # no retry on 500
+
+
+# -- Ranking function --------------------------------------------------------
+
+
+from turtle_crypto.scanner import compute_rank_score
+
+
+def test_rank_score_s2_breakout_highest_tier() -> None:
+    stats = {
+        "close": 120.0, "atr": 5.0,
+        "s1_high": 100.0, "s1_low": 90.0,
+        "s2_high": 110.0, "s2_low": 85.0,
+        "s1_channel_pct": 200.0, "s2_channel_pct": 140.0,
+        "s1_signal": "LONG", "s2_signal": "LONG",
+        "return_55d": 0.20,
+    }
+    score = compute_rank_score(stats, vol_24h_usd=10_000_000.0)
+    # S2 LONG: breakout = 2.0 + (120 - 110) / 5 = 4.0
+    # trend = 1.0 + 0.20 = 1.2
+    # liquidity = log10(10_000_000) = 7.0
+    assert abs(score - 4.0 * 1.2 * 7.0) < 0.01
+    assert score > 30.0  # high score
+
+
+def test_rank_score_s1_breakout_mid_tier() -> None:
+    stats = {
+        "close": 102.0, "atr": 5.0,
+        "s1_high": 100.0, "s1_low": 90.0,
+        "s2_high": 110.0, "s2_low": 85.0,
+        "s1_channel_pct": 120.0, "s2_channel_pct": 68.0,
+        "s1_signal": "LONG", "s2_signal": "—",
+        "return_55d": 0.10,
+    }
+    score = compute_rank_score(stats, vol_24h_usd=1_000_000.0)
+    # S1 LONG: breakout = 1.0 + (102 - 100) / 5 = 1.4
+    # trend = 1.0 + 0.10 = 1.1
+    # liquidity = log10(1_000_000) = 6.0
+    assert abs(score - 1.4 * 1.1 * 6.0) < 0.01
+
+
+def test_rank_score_approaching_lowest_tier() -> None:
+    stats = {
+        "close": 97.0, "atr": 5.0,
+        "s1_high": 100.0, "s1_low": 90.0,
+        "s2_high": 110.0, "s2_low": 85.0,
+        "s1_channel_pct": 90.0, "s2_channel_pct": 48.0,
+        "s1_signal": "—", "s2_signal": "—",
+        "return_55d": 0.05,
+    }
+    score = compute_rank_score(stats, vol_24h_usd=500_000.0)
+    # Neither signal: breakout = 90 / 100 = 0.9
+    # trend = 1.0 + 0.05 = 1.05
+    # liquidity = log10(500_000) ≈ 5.699
+    assert score < 6.0  # well below breakout scores
+
+
+def test_rank_score_s2_always_above_s1() -> None:
+    # Same pair, same everything, but S2 vs S1 breakout.
+    base = {
+        "close": 102.0, "atr": 5.0,
+        "s1_high": 100.0, "s1_low": 90.0,
+        "s2_high": 100.0, "s2_low": 85.0,
+        "s1_channel_pct": 120.0, "s2_channel_pct": 120.0,
+        "return_55d": 0.10,
+    }
+    s2_stats = {**base, "s1_signal": "LONG", "s2_signal": "LONG"}
+    s1_stats = {**base, "s1_signal": "LONG", "s2_signal": "—"}
+    s2_score = compute_rank_score(s2_stats, vol_24h_usd=1_000_000.0)
+    s1_score = compute_rank_score(s1_stats, vol_24h_usd=1_000_000.0)
+    assert s2_score > s1_score
+
+
+def test_rank_score_negative_return_not_penalized_below_neutral() -> None:
+    stats = {
+        "close": 102.0, "atr": 5.0,
+        "s1_high": 100.0, "s1_low": 90.0,
+        "s2_high": 110.0, "s2_low": 85.0,
+        "s1_channel_pct": 120.0, "s2_channel_pct": 68.0,
+        "s1_signal": "LONG", "s2_signal": "—",
+        "return_55d": -0.30,
+    }
+    score = compute_rank_score(stats, vol_24h_usd=1_000_000.0)
+    # trend = 1.0 + max(-0.30, 0) = 1.0 (neutral, not negative)
+    # breakout = 1.0 + (102-100)/5 = 1.4
+    # liquidity = 6.0
+    assert abs(score - 1.4 * 1.0 * 6.0) < 0.01
+
+
+def test_rank_score_zero_atr_returns_zero() -> None:
+    stats = {
+        "close": 100.0, "atr": 0.0,
+        "s1_high": 100.0, "s1_low": 90.0,
+        "s2_high": 110.0, "s2_low": 85.0,
+        "s1_channel_pct": 100.0, "s2_channel_pct": 60.0,
+        "s1_signal": "LONG", "s2_signal": "—",
+        "return_55d": 0.10,
+    }
+    assert compute_rank_score(stats, vol_24h_usd=1_000_000.0) == 0.0
