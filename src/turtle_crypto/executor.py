@@ -119,14 +119,16 @@ class Executor:
                 "Pass --reset-halt to execute_live.py to clear it."
             )
 
-        # 1) JWT round-trip: fetch accounts. Any HTTP/auth error surfaces here.
+        # 1) JWT round-trip: fetch accounts scoped to our portfolio.
         try:
-            accounts = self._client.get_accounts()
+            accounts = self._client.get_accounts(
+                retail_portfolio_id=self._portfolio_uuid
+            )
         except CoinbaseClientError as exc:
             raise SanityCheckError(f"JWT round-trip against /accounts failed: {exc}") from exc
         if not isinstance(accounts, list):
             raise SanityCheckError("Accounts response did not return a list")
-        logger.info("Auth OK — %d accounts visible", len(accounts))
+        logger.info("Auth OK — %d accounts in portfolio %s", len(accounts), self._portfolio_uuid)
 
         # 2) Portfolio must exist in the API key's allowed set.
         try:

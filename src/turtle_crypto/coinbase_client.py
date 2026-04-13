@@ -200,12 +200,15 @@ class CoinbaseClient:
     # Private (auth required)
     # ------------------------------------------------------------------
 
-    def get_accounts(self) -> list[dict[str, Any]]:
-        """Auth smoke test + account list. Paginates until cursor is empty."""
+    def get_accounts(self, *, retail_portfolio_id: str | None = None) -> list[dict[str, Any]]:
+        """Auth smoke test + account list. Paginates until cursor is empty.
+        If retail_portfolio_id is provided, only accounts in that portfolio are returned."""
         out: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
             params: dict[str, Any] = {"limit": 250}
+            if retail_portfolio_id:
+                params["retail_portfolio_id"] = retail_portfolio_id
             if cursor:
                 params["cursor"] = cursor
             payload = self._signed_get(PRIVATE_ACCOUNTS_PATH, params=params)
