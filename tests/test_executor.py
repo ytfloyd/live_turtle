@@ -115,24 +115,24 @@ def test_sanity_checks_fail_on_auth_error(audit: AuditStore) -> None:
         ex.run_sanity_checks()
 
 
-def test_sanity_checks_fail_on_balance_drift(audit: AuditStore) -> None:
+def test_sanity_checks_fail_on_low_balance(audit: AuditStore) -> None:
     client = _sane_client()
     client.get_accounts.return_value = [
         {"uuid": "a1", "available_balance": {"value": "5000", "currency": "USDC"}},
     ]
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
-    with pytest.raises(SanityCheckError, match="outside tolerance"):
+    with pytest.raises(SanityCheckError, match="below minimum"):
         ex.run_sanity_checks()
 
 
 def test_sanity_checks_fail_on_zero_usd_balance(audit: AuditStore) -> None:
     client = _sane_client()
-    # No USD accounts at all — balance sums to $0.
+    # No USD/USDC accounts — balance sums to $0.
     client.get_accounts.return_value = [
         {"uuid": "a1", "available_balance": {"value": "5.0", "currency": "BTC"}},
     ]
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
-    with pytest.raises(SanityCheckError, match="outside tolerance"):
+    with pytest.raises(SanityCheckError, match="below minimum"):
         ex.run_sanity_checks()
 
 
