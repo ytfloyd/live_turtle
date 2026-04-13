@@ -18,6 +18,7 @@ Key rules
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -28,14 +29,16 @@ from typing import Any
 import pandas as pd
 from tabulate import tabulate
 
-from turtle_crypto.coinbase_client import CoinbaseClient, CoinbaseClientError
+from turtle_crypto.coinbase_client import CoinbaseClient, CoinbaseClientError, CoinbaseHTTPError
 from turtle_crypto.config import (
     ATR_PERIOD,
     CANDLE_HISTORY_DAYS,
     EXCLUDE_BASES,
     MIN_CANDLES_REQUIRED,
+    SCANNER_429_BASE_DELAY_SEC,
+    SCANNER_429_MAX_RETRIES,
+    SCANNER_MAX_REQUESTS_PER_SEC,
     SCANNER_MIN_24H_VOL_USD,
-    SCANNER_PER_REQUEST_SLEEP_SEC,
     SCANNER_PRODUCTS_PAGE_LIMIT,
     SCANNER_THREAD_WORKERS,
     SYSTEM1_ENTRY_PERIOD,
@@ -209,6 +212,30 @@ def _fetch_candles_for_product(
     return df
 
 
+class _TokenBucketRateLimiter:
+    """Thread-safe token-bucket rate limiter. stdlib only."""
+
+    def __init__(self, rate: float, capacity: int = 1) -> None:
+        self._rate = rate
+        self._capacity = capacity
+        self._tokens = float(capacity)
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last
+                self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)
+                self._last = now
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                wait = (1.0 - self._tokens) / self._rate
+            time.sleep(wait)
+
+
 def fetch_all_candles(
     client: CoinbaseClient,
     products: list[dict[str, Any]],
@@ -217,20 +244,40 @@ def fetch_all_candles(
     workers: int = SCANNER_THREAD_WORKERS,
 ) -> dict[str, pd.DataFrame]:
     """
-    Parallel candle fetch. Pairs with network errors or short history are
-    silently dropped (with a warning log) so one broken pair doesn't halt the
-    full scan.
+    Parallel candle fetch with global rate limiting and retry on 429.
+
+    Pairs with non-transient errors or short history are silently dropped
+    (with a warning log) so one broken pair doesn't halt the full scan.
     """
     out: dict[str, pd.DataFrame] = {}
+    rate_limiter = _TokenBucketRateLimiter(rate=SCANNER_MAX_REQUESTS_PER_SEC)
+    max_retries = SCANNER_429_MAX_RETRIES
+    base_delay = SCANNER_429_BASE_DELAY_SEC
 
     def _task(product_id: str) -> tuple[str, pd.DataFrame | None]:
-        try:
-            df = _fetch_candles_for_product(client, product_id, days)
-            time.sleep(SCANNER_PER_REQUEST_SLEEP_SEC)
-            return product_id, df
-        except CoinbaseClientError as exc:
-            logger.warning("Candle fetch failed for %s: %s", product_id, exc)
-            return product_id, None
+        last_exc: Exception | None = None
+        for attempt in range(1 + max_retries):
+            rate_limiter.acquire()
+            try:
+                df = _fetch_candles_for_product(client, product_id, days)
+                return product_id, df
+            except CoinbaseHTTPError as exc:
+                if exc.status == 429 and attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "429 for %s (attempt %d/%d), retrying in %.1fs",
+                        product_id, attempt + 1, max_retries + 1, delay,
+                    )
+                    time.sleep(delay)
+                    last_exc = exc
+                    continue
+                logger.warning("Candle fetch failed for %s: %s", product_id, exc)
+                return product_id, None
+            except CoinbaseClientError as exc:
+                logger.warning("Candle fetch failed for %s: %s", product_id, exc)
+                return product_id, None
+        logger.warning("Candle fetch exhausted retries for %s: %s", product_id, last_exc)
+        return product_id, None
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_task, p["product_id"]) for p in products if "product_id" in p]

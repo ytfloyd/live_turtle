@@ -127,6 +127,14 @@ SCANNER_THREAD_WORKERS: int = 6
 SCANNER_PER_REQUEST_SLEEP_SEC: float = 0.08
 SCANNER_PRODUCTS_PAGE_LIMIT: int = 250
 
+# Global rate cap: max requests per second across ALL scanner threads.
+# Coinbase public API limit is ~10 req/s; we target 8 to leave headroom.
+SCANNER_MAX_REQUESTS_PER_SEC: float = 8.0
+
+# Retry policy for transient 429 (Too Many Requests) errors.
+SCANNER_429_MAX_RETRIES: int = 2
+SCANNER_429_BASE_DELAY_SEC: float = 1.0
+
 # ---------------------------------------------------------------------------
 # Stablecoin / wrapped / pegged exclusion set
 # ---------------------------------------------------------------------------
