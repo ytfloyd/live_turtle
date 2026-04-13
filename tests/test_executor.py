@@ -39,9 +39,9 @@ def _make_order(
     asset: str = "BTC",
     product_id: str = "BTC-USD",
     order_type: str = "MARKET_BUY",
-    base_size: Decimal = Decimal("0.002"),
-    notional: Decimal = Decimal("140"),
-    risk: Decimal = Decimal("10"),
+    base_size: Decimal = Decimal("0.02"),
+    notional: Decimal = Decimal("1400"),
+    risk: Decimal = Decimal("100"),
     entry_price: Decimal = Decimal("70000"),
 ) -> TradeOrder:
     stop_price = entry_price - Decimal("4800")
@@ -66,7 +66,7 @@ def _sane_client() -> MagicMock:
     """Build a CoinbaseClient mock that passes every sanity check."""
     client = MagicMock(spec=CoinbaseClient)
     client.get_accounts.return_value = [
-        {"uuid": "a1", "available_balance": {"value": "1000", "currency": "USD"}},
+        {"uuid": "a1", "available_balance": {"value": "10000", "currency": "USDC"}},
     ]
     client.get_portfolios.return_value = [
         {"uuid": PORTFOLIO_UUID, "name": "turtle"},
@@ -118,7 +118,7 @@ def test_sanity_checks_fail_on_auth_error(audit: AuditStore) -> None:
 def test_sanity_checks_fail_on_balance_drift(audit: AuditStore) -> None:
     client = _sane_client()
     client.get_accounts.return_value = [
-        {"uuid": "a1", "available_balance": {"value": "500", "currency": "USD"}},
+        {"uuid": "a1", "available_balance": {"value": "5000", "currency": "USDC"}},
     ]
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
     with pytest.raises(SanityCheckError, match="outside tolerance"):
@@ -193,7 +193,7 @@ def test_notional_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=False)
     ex.run_sanity_checks()
-    too_big = _make_order(notional=Decimal("160"))  # > 150 cap
+    too_big = _make_order(notional=Decimal("1600"))  # > 1500 cap
     with pytest.raises(CapViolation, match="notional"):
         ex.place_order(too_big)
     client.place_market_buy.assert_not_called()
@@ -203,7 +203,7 @@ def test_heat_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
     ex.run_sanity_checks()
-    # 20 $10-risk orders = $200 = exactly the cap. The 21st should fail.
+    # 20 $100-risk orders = $2000 = exactly the cap. The 21st should fail.
     for i in range(20):
         ex.place_order(_make_order(product_id=f"SYM{i}-USD"))
     with pytest.raises(CapViolation, match="heat cap"):
@@ -236,8 +236,8 @@ def test_live_success_fills_and_increments_counter(audit: AuditStore) -> None:
     # Session totals tracked.
     notional, risk, count = ex.session_totals
     assert count == 1
-    assert notional == Decimal("140")
-    assert risk == Decimal("10")
+    assert notional == Decimal("1400")
+    assert risk == Decimal("100")
 
 
 def test_live_network_error_halts_executor(audit: AuditStore) -> None:

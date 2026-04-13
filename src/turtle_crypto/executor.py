@@ -171,16 +171,16 @@ class Executor:
 
         self._sanity_checked = True
 
+    # Currencies treated as USD-equivalent for the balance sanity check.
+    _USD_EQUIVALENT_CURRENCIES = frozenset({"USD", "USDC"})
+
     @staticmethod
     def _sum_usd_from_accounts(accounts: list[dict[str, Any]]) -> Decimal:
         """
         Sum the USD-equivalent value across all accounts. Each account has:
             available_balance: {value, currency}
-        We sum every account's available_balance.value — Coinbase reports all
-        balances in the account's native currency, but the USD account gives
-        the cash value directly, and crypto accounts give the base quantity.
-        For this sanity check we only need the USD cash account to be in range;
-        crypto holdings make the total higher, which is fine (tolerance is ±20%).
+        We count both USD and USDC as dollar-equivalent (USDC is 1:1 pegged
+        and redeemable on Coinbase).
         """
         total = Decimal("0")
         for account in accounts:
@@ -191,7 +191,7 @@ class Executor:
                 continue
             currency = bal.get("currency")
             value_raw = bal.get("value")
-            if currency == "USD" and value_raw is not None:
+            if currency in Executor._USD_EQUIVALENT_CURRENCIES and value_raw is not None:
                 try:
                     total += Decimal(str(value_raw))
                 except (ArithmeticError, ValueError):
