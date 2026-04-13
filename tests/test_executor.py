@@ -39,9 +39,9 @@ def _make_order(
     asset: str = "BTC",
     product_id: str = "BTC-USD",
     order_type: str = "MARKET_BUY",
-    base_size: Decimal = Decimal("0.02"),
-    notional: Decimal = Decimal("1400"),
-    risk: Decimal = Decimal("100"),
+    base_size: Decimal = Decimal("0.002"),
+    notional: Decimal = Decimal("140"),
+    risk: Decimal = Decimal("10"),
     entry_price: Decimal = Decimal("70000"),
 ) -> TradeOrder:
     stop_price = entry_price - Decimal("4800")
@@ -73,7 +73,7 @@ def _sane_client() -> MagicMock:
     client.get_portfolio_breakdown.return_value = {
         "portfolio": {"uuid": PORTFOLIO_UUID},
         "portfolio_balances": {
-            "total_balance": {"value": "10000", "currency": "USD"},
+            "total_balance": {"value": "1000", "currency": "USD"},
         },
     }
     client.place_market_buy.return_value = {
@@ -122,7 +122,7 @@ def test_sanity_checks_fail_on_auth_error(audit: AuditStore) -> None:
 def test_sanity_checks_fail_on_balance_drift(audit: AuditStore) -> None:
     client = _sane_client()
     client.get_portfolio_breakdown.return_value = {
-        "portfolio_balances": {"total_balance": {"value": "5000", "currency": "USD"}}
+        "portfolio_balances": {"total_balance": {"value": "500", "currency": "USD"}}
     }
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
     with pytest.raises(SanityCheckError, match="outside tolerance"):
@@ -204,7 +204,7 @@ def test_notional_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=False)
     ex.run_sanity_checks()
-    too_big = _make_order(notional=Decimal("1600"))  # > 1500 cap
+    too_big = _make_order(notional=Decimal("160"))  # > 150 cap
     with pytest.raises(CapViolation, match="notional"):
         ex.place_order(too_big)
     client.place_market_buy.assert_not_called()
@@ -247,8 +247,8 @@ def test_live_success_fills_and_increments_counter(audit: AuditStore) -> None:
     # Session totals tracked.
     notional, risk, count = ex.session_totals
     assert count == 1
-    assert notional == Decimal("1400")
-    assert risk == Decimal("100")
+    assert notional == Decimal("140")
+    assert risk == Decimal("10")
 
 
 def test_live_network_error_halts_executor(audit: AuditStore) -> None:

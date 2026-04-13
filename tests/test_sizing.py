@@ -268,7 +268,7 @@ def test_build_sheet_produces_typed_orders() -> None:
             "base_min_size": "0.00000001",
         }
     }
-    sheet = build_trade_sheet(df, details)
+    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
     assert len(sheet.active_orders) == 1
     order = sheet.active_orders[0]
     assert order.asset == "BTC"
@@ -289,7 +289,7 @@ def test_build_sheet_skips_low_volume() -> None:
                 "close": 1.0,
                 "atr": 0.01,
                 "atr_pct": 1.0,
-                "vol_24h_usd": 100_000.0,  # below MIN_24H_VOL_USD (500k)
+                "vol_24h_usd": 50_000.0,  # below MIN_24H_VOL_USD (100k)
                 "s1_signal": "LONG",
                 "s2_signal": "—",
                 "s1_channel_pct": 100.0,
@@ -298,7 +298,7 @@ def test_build_sheet_skips_low_volume() -> None:
         ]
     )
     details = {"THIN-USD": {"base_increment": "0.01", "base_min_size": "0.01"}}
-    sheet = build_trade_sheet(df, details)
+    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
     assert len(sheet.active_orders) == 0
     assert len(sheet.rows) == 1
     assert "24h vol" in (sheet.rows[0].skip_reason or "")
@@ -322,7 +322,7 @@ def test_build_sheet_skips_too_volatile() -> None:
         ]
     )
     details = {"VOL-USD": {"base_increment": "0.01", "base_min_size": "0.01"}}
-    sheet = build_trade_sheet(df, details)
+    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
     assert len(sheet.active_orders) == 0
     assert "ATR" in (sheet.rows[0].skip_reason or "")
 
@@ -347,7 +347,7 @@ def test_build_sheet_skips_oversize_notional() -> None:
         ]
     )
     details = {"FAT-USD": {"base_increment": "0.001", "base_min_size": "0.001"}}
-    sheet = build_trade_sheet(df, details)
+    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
     # Raw math: unit_raw = 100 / (2*0.05) = 1000 base; notional = 100,000.
     # That blows the $1,500 cap per order.
     assert len(sheet.active_orders) == 0
@@ -380,7 +380,7 @@ def test_build_sheet_heat_aggregation() -> None:
         "BTC-USD": {"base_increment": "0.00000001", "base_min_size": "0.00000001"},
         "ETH-USD": {"base_increment": "0.00000001", "base_min_size": "0.00000001"},
     }
-    sheet = build_trade_sheet(df, details)
+    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
     assert len(sheet.active_orders) == 2
     assert abs(sheet.total_risk_usd - Decimal("200")) < Decimal("0.01")
     assert not sheet.heat_cap_exceeded
@@ -410,7 +410,7 @@ def test_build_sheet_heat_cap_breach_reports_scale_down() -> None:
         )
         details[pid] = {"base_increment": "0.001", "base_min_size": "0.001"}
     df = _build_fixture_df(rows)
-    sheet = build_trade_sheet(df, details)
+    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
     assert sheet.heat_cap_exceeded
     # Total risk should be ~20 * $100 = $2000 in principle; cap = $1200.
     assert sheet.heat_scale_ratio < Decimal("1")

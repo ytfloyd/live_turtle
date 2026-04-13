@@ -44,7 +44,6 @@ from turtle_crypto.config import (
     BUY_STOP_TRIGGER_CHANNEL_PCT,
     HALF_UNIT_MULTIPLIER,
     MAX_ATR_PCT,
-    MAX_NOTIONAL_PER_ORDER_USD,
     MAX_PORTFOLIO_HEAT,
     MIN_24H_VOL_USD,
     RISK_PER_UNIT,
@@ -391,11 +390,12 @@ def build_trade_sheet(
             )
             continue
 
-        if notional_usd > MAX_NOTIONAL_PER_ORDER_USD:
+        max_notional = account_size * Decimal("0.15")
+        if notional_usd > max_notional:
             rows.append(
                 _replace(
                     base_row,
-                    skip_reason=f"notional ${notional_usd:,.2f} > cap ${MAX_NOTIONAL_PER_ORDER_USD}",
+                    skip_reason=f"notional ${notional_usd:,.2f} > 15% cap ${max_notional:,.2f}",
                 )
             )
             continue

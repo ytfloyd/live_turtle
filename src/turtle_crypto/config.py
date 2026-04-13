@@ -34,7 +34,7 @@ PRIVATE_ORDERS_PATH: str = "/api/v3/brokerage/orders"
 
 # Hardcoded account size. The system refuses to run if the live portfolio
 # balance differs from this by more than 20% (sanity check at startup).
-ACCOUNT_SIZE: Decimal = Decimal("10000")
+ACCOUNT_SIZE: Decimal = Decimal("1000")
 
 # Acceptable drift from ACCOUNT_SIZE before the executor refuses to run.
 # Expressed as a fraction (0.20 == 20%).
@@ -78,15 +78,17 @@ STOP_LOSS_ATR_MULTIPLE: Decimal = Decimal("2")
 MAX_UNITS_PER_MARKET: int = 4
 
 # Maximum total portfolio heat (sum of risk across open positions), as a
-# fraction of account size. 12% of $10k = $1,200.
+# fraction of account size. 12% of $1k = $120.
 MAX_PORTFOLIO_HEAT: Decimal = Decimal("0.12")
 
 # Hard cap on notional per single order, in USD. Prevents a single mispriced
 # order from moving more than 15% of the account.
-MAX_NOTIONAL_PER_ORDER_USD: Decimal = Decimal("1500")
+# Hard cap on notional per single order, in USD. Prevents a single mispriced
+# order from moving more than 15% of the account.
+MAX_NOTIONAL_PER_ORDER_USD: Decimal = Decimal("150")
 
 # Execution filters — tighter than the scanner's universe filter.
-MIN_24H_VOL_USD: Decimal = Decimal("500000")
+MIN_24H_VOL_USD: Decimal = Decimal("100000")
 MAX_ATR_PCT: Decimal = Decimal("12.0")
 
 # Scanner universe filter — looser to keep a wide discovery net.
@@ -115,9 +117,9 @@ STOP_LIMIT_SLIPPAGE: Decimal = Decimal("0.005")
 # Executor hard caps (enforced inside the executor even in dry-run mode)
 # ---------------------------------------------------------------------------
 
-MAX_ORDER_NOTIONAL_USD: Decimal = Decimal("1500")
+MAX_ORDER_NOTIONAL_USD: Decimal = Decimal("150")
 MAX_DAILY_ORDERS: int = 15
-MAX_PORTFOLIO_HEAT_USD: Decimal = Decimal("1200")
+MAX_PORTFOLIO_HEAT_USD: Decimal = Decimal("120")
 
 # ---------------------------------------------------------------------------
 # Scanner concurrency
