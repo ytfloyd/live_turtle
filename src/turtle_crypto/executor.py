@@ -207,28 +207,33 @@ class Executor:
         """
         Extract non-zero crypto holdings from the accounts list.
 
-        Returns {currency: balance} for every currency with a positive balance,
-        excluding USD/USDC (those are cash, not positions).
+        Returns {currency: total_balance} for every currency with a positive
+        balance, excluding USD/USDC. Sums both available_balance and hold
+        because resting stop-loss orders move the balance into hold.
         """
         holdings: dict[str, Decimal] = {}
         for account in accounts:
             if not isinstance(account, dict):
                 continue
-            bal = account.get("available_balance")
-            if not isinstance(bal, dict):
-                continue
-            currency = bal.get("currency")
-            value_raw = bal.get("value")
+            currency = None
+            total = Decimal("0")
+            for field in ("available_balance", "hold"):
+                bal = account.get(field)
+                if not isinstance(bal, dict):
+                    continue
+                if currency is None:
+                    currency = bal.get("currency")
+                value_raw = bal.get("value")
+                if value_raw is None:
+                    continue
+                try:
+                    total += Decimal(str(value_raw))
+                except (ArithmeticError, ValueError):
+                    continue
             if not currency or currency in Executor._USD_EQUIVALENT_CURRENCIES:
                 continue
-            if value_raw is None:
-                continue
-            try:
-                amount = Decimal(str(value_raw))
-            except (ArithmeticError, ValueError):
-                continue
-            if amount > 0:
-                holdings[currency] = amount
+            if total > 0:
+                holdings[currency] = total
         return holdings
 
     def filter_already_held(self, orders: list[TradeOrder]) -> list[TradeOrder]:

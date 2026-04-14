@@ -58,6 +58,42 @@ def load_cdp_key_or_die(path: str) -> CDPKey:
         sys.exit(f"ERROR loading CDP key at {path}: {exc}")
 
 
+def parse_holdings(accounts: list[dict]) -> dict[str, "Decimal"]:
+    """
+    Extract non-zero crypto holdings from the accounts list.
+
+    Sums both available_balance and hold for each account — resting
+    stop-loss orders move the balance from available into hold.
+    """
+    from decimal import Decimal
+
+    _CASH = frozenset({"USD", "USDC"})
+    holdings: dict[str, Decimal] = {}
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        currency = None
+        total = Decimal("0")
+        for field in ("available_balance", "hold"):
+            bal = account.get(field)
+            if not isinstance(bal, dict):
+                continue
+            if currency is None:
+                currency = bal.get("currency")
+            value_raw = bal.get("value")
+            if value_raw is None:
+                continue
+            try:
+                total += Decimal(str(value_raw))
+            except (ArithmeticError, ValueError):
+                continue
+        if not currency or currency in _CASH:
+            continue
+        if total > 0:
+            holdings[currency] = total
+    return holdings
+
+
 def fetch_product_details_bulk(
     client: CoinbaseClient, product_ids: list[str]
 ) -> dict[str, dict]:

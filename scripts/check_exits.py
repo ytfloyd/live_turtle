@@ -25,7 +25,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _common import configure_logging, load_cdp_key_or_die, load_env_or_die  # noqa: E402
+from _common import configure_logging, load_cdp_key_or_die, load_env_or_die, parse_holdings  # noqa: E402
 
 from turtle_crypto.audit import AuditStore  # noqa: E402
 from turtle_crypto.coinbase_client import CoinbaseClient, CoinbaseClientError  # noqa: E402
@@ -56,27 +56,9 @@ def main() -> int:
     client = CoinbaseClient(cdp_key)
     portfolio_uuid = env["ALLOWED_PORTFOLIO_UUID"]
 
-    # 1) Get current holdings.
+    # 1) Get current holdings (available + hold, since stops lock balances).
     accounts = client.get_accounts()
-    holdings: dict[str, Decimal] = {}
-    for account in accounts:
-        if not isinstance(account, dict):
-            continue
-        bal = account.get("available_balance")
-        if not isinstance(bal, dict):
-            continue
-        currency = bal.get("currency")
-        value_raw = bal.get("value")
-        if not currency or currency in ("USD", "USDC"):
-            continue
-        if value_raw is None:
-            continue
-        try:
-            amount = Decimal(str(value_raw))
-        except (ArithmeticError, ValueError):
-            continue
-        if amount > 0:
-            holdings[currency] = amount
+    holdings = parse_holdings(accounts)
 
     if not holdings:
         print("No crypto holdings. Nothing to check.")
