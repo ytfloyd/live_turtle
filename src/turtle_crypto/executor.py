@@ -444,6 +444,14 @@ class Executor:
             order=order, status="filled", response=response, error_text=None
         )
 
+    @staticmethod
+    def _floor_to_increment(value: Decimal, increment: Decimal) -> Decimal:
+        if increment <= 0:
+            return value
+        from decimal import ROUND_DOWN
+        steps = (value / increment).quantize(Decimal("1"), rounding=ROUND_DOWN)
+        return steps * increment
+
     def _place_stop_loss(self, order: TradeOrder, exec_pid: str) -> None:
         """
         Place a stop-limit sell at the 2N stop price immediately after a fill.
@@ -457,15 +465,37 @@ class Executor:
         stops on subsequent fills. The operator should review the audit log
         and place the stop manually if this fails.
         """
-        stop_price = order.stop_loss_price
-        limit_price = stop_price * (Decimal("1") - STOP_LOSS_SLIPPAGE)
+        # Fetch product details for the execution pair to get price/size precision.
+        try:
+            details = self._client.get_product_details(exec_pid)
+            quote_inc = Decimal(str(details["quote_increment"]))
+            base_inc = Decimal(str(details["base_increment"]))
+        except (CoinbaseClientError, KeyError, ValueError) as exc:
+            logger.error(
+                "STOP_LOSS FAILED for %s: could not fetch product details: %s — place manually",
+                exec_pid, exc,
+            )
+            return
+
+        raw_stop = order.stop_loss_price
+        raw_limit = raw_stop * (Decimal("1") - STOP_LOSS_SLIPPAGE)
+        stop_price = self._floor_to_increment(raw_stop, quote_inc)
+        limit_price = self._floor_to_increment(raw_limit, quote_inc)
+        base_size = self._floor_to_increment(order.base_size, base_inc)
         stop_order_id = f"turtle-stop-{uuid.uuid4().hex}"
+
+        if stop_price <= 0 or limit_price <= 0 or base_size <= 0:
+            logger.error(
+                "STOP_LOSS FAILED for %s: rounded values are zero — place manually",
+                exec_pid,
+            )
+            return
 
         stop_intent = {
             "type": "STOP_LOSS",
             "parent_product_id": order.product_id,
             "exec_product_id": exec_pid,
-            "base_size": _dec_str(order.base_size),
+            "base_size": _dec_str(base_size),
             "stop_price": _dec_str(stop_price),
             "limit_price": _dec_str(limit_price),
         }
@@ -487,7 +517,7 @@ class Executor:
         try:
             stop_response = self._client.place_stop_limit_sell(
                 product_id=exec_pid,
-                base_size=order.base_size,
+                base_size=base_size,
                 limit_price=limit_price,
                 stop_price=stop_price,
                 retail_portfolio_id=self._portfolio_uuid,

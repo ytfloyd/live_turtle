@@ -80,6 +80,16 @@ def _sane_client() -> MagicMock:
         "success": True,
         "order_id": "server-id-2",
     }
+    client.place_stop_limit_sell.return_value = {
+        "success": True,
+        "order_id": "server-id-3",
+    }
+    client.get_product_details.return_value = {
+        "product_id": "BTC-USDC",
+        "base_increment": "0.00000001",
+        "quote_increment": "0.01",
+        "base_min_size": "0.00000001",
+    }
     return client
 
 

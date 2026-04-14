@@ -20,7 +20,7 @@ import argparse
 import logging
 import sys
 import uuid
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,14 @@ from turtle_crypto.config import (  # noqa: E402
     STOP_LOSS_SLIPPAGE,
 )
 from turtle_crypto.scanner import run_scan  # noqa: E402
+
+
+def _floor_to_increment(value: Decimal, increment: Decimal) -> Decimal:
+    """Floor `value` to the nearest multiple of `increment`."""
+    if increment <= 0:
+        return value
+    steps = (value / increment).quantize(Decimal("1"), rounding=ROUND_DOWN)
+    return steps * increment
 
 
 def main() -> int:
@@ -88,7 +96,21 @@ def main() -> int:
     logger.info("Running scanner for ATR data...")
     df = run_scan(client)
 
-    # 3) Match holdings to scanner data and compute stops.
+    # 3) Fetch product details for each USDC pair (for price/size precision).
+    logger.info("Fetching product details for USDC pairs...")
+    product_specs: dict[str, dict[str, Decimal]] = {}
+    for currency in holdings:
+        exec_pid = f"{currency}-USDC"
+        try:
+            details = client.get_product_details(exec_pid)
+            product_specs[currency] = {
+                "quote_increment": Decimal(str(details["quote_increment"])),
+                "base_increment": Decimal(str(details["base_increment"])),
+            }
+        except CoinbaseClientError as exc:
+            logger.warning("Could not fetch details for %s: %s", exec_pid, exc)
+
+    # 4) Match holdings to scanner data and compute stops.
     stops: list[dict[str, Any]] = []
     for currency, held_amount in sorted(holdings.items()):
         product_id = f"{currency}-USD"
@@ -97,23 +119,39 @@ def main() -> int:
             print(f"  {currency:10s}  SKIP — not in scanner universe (no ATR data)")
             continue
 
-        close = Decimal(str(row.iloc[0]["close"]))
-        atr = Decimal(str(row.iloc[0]["atr"]))
-        stop_price = close - STOP_LOSS_ATR_MULTIPLE * atr
-        limit_price = stop_price * (Decimal("1") - STOP_LOSS_SLIPPAGE)
-
-        if stop_price <= 0:
-            print(f"  {currency:10s}  SKIP — computed stop price <= 0")
+        specs = product_specs.get(currency)
+        if specs is None:
+            print(f"  {currency:10s}  SKIP — no USDC product details")
             continue
 
-        # Execution product ID: XXX-USDC
+        quote_inc = specs["quote_increment"]
+        base_inc = specs["base_increment"]
+
+        close = Decimal(str(row.iloc[0]["close"]))
+        atr = Decimal(str(row.iloc[0]["atr"]))
+        raw_stop = close - STOP_LOSS_ATR_MULTIPLE * atr
+        raw_limit = raw_stop * (Decimal("1") - STOP_LOSS_SLIPPAGE)
+
+        # Round prices to the product's quote_increment.
+        stop_price = _floor_to_increment(raw_stop, quote_inc)
+        limit_price = _floor_to_increment(raw_limit, quote_inc)
+        # Round base_size to the product's base_increment.
+        base_size = _floor_to_increment(held_amount, base_inc)
+
+        if stop_price <= 0 or limit_price <= 0:
+            print(f"  {currency:10s}  SKIP — computed stop price <= 0")
+            continue
+        if base_size <= 0:
+            print(f"  {currency:10s}  SKIP — held amount rounds to 0")
+            continue
+
         exec_pid = f"{currency}-USDC"
 
         stops.append({
             "currency": currency,
             "product_id": product_id,
             "exec_pid": exec_pid,
-            "held_amount": held_amount,
+            "base_size": base_size,
             "close": close,
             "atr": atr,
             "stop_price": stop_price,
@@ -124,15 +162,15 @@ def main() -> int:
         print("\nNo stops to place.")
         return 0
 
-    # 4) Print summary.
+    # 5) Print summary.
     print(f"\n=== STOP-LOSS ORDERS TO PLACE ({len(stops)}) ===")
-    print(f"{'asset':10s}  {'held':>14s}  {'close':>12s}  {'ATR':>10s}  {'stop':>12s}  {'limit':>12s}  {'exec pair':12s}")
+    print(f"{'asset':10s}  {'size':>14s}  {'close':>12s}  {'ATR':>10s}  {'stop':>12s}  {'limit':>12s}  {'pair':12s}")
     print("-" * 96)
     for s in stops:
         print(
-            f"{s['currency']:10s}  {s['held_amount']:>14f}  "
-            f"${s['close']:>10f}  ${s['atr']:>8f}  "
-            f"${s['stop_price']:>10f}  ${s['limit_price']:>10f}  "
+            f"{s['currency']:10s}  {str(s['base_size']):>14s}  "
+            f"${str(s['close']):>10s}  ${str(s['atr']):>8s}  "
+            f"${str(s['stop_price']):>10s}  ${str(s['limit_price']):>10s}  "
             f"{s['exec_pid']:12s}"
         )
 
@@ -140,7 +178,7 @@ def main() -> int:
         print("\n  DRY RUN — no orders placed. Add --live to execute.")
         return 0
 
-    # 5) Place the stops.
+    # 6) Place the stops.
     print(f"\n  Placing {len(stops)} stop-loss orders...")
     audit = AuditStore(DEFAULT_AUDIT_DB_PATH)
     success_count = 0
@@ -150,7 +188,7 @@ def main() -> int:
             "type": "STOP_LOSS_BACKFILL",
             "product_id": s["product_id"],
             "exec_pid": s["exec_pid"],
-            "base_size": str(s["held_amount"]),
+            "base_size": str(s["base_size"]),
             "stop_price": str(s["stop_price"]),
             "limit_price": str(s["limit_price"]),
         }
@@ -164,7 +202,7 @@ def main() -> int:
         try:
             response = client.place_stop_limit_sell(
                 product_id=s["exec_pid"],
-                base_size=s["held_amount"],
+                base_size=s["base_size"],
                 limit_price=s["limit_price"],
                 stop_price=s["stop_price"],
                 retail_portfolio_id=portfolio_uuid,
