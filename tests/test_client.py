@@ -153,6 +153,20 @@ def test_place_market_buy_payload(cdp_key: CDPKey) -> None:
     assert kwargs["headers"]["Content-Type"] == "application/json"
 
 
+def test_place_market_buy_truncates_quote_size_to_2dp(cdp_key: CDPKey) -> None:
+    session = _mock_session(200, {"success": True, "order_id": "abc"})
+    client = CoinbaseClient(cdp_key, session=session)
+    client.place_market_buy(
+        product_id="BTC-USD",
+        quote_size_usd=Decimal("617.27146"),
+        retail_portfolio_id="p",
+        client_order_id="trunc-test",
+    )
+    _, kwargs = session.post.call_args
+    body = kwargs["json"]
+    assert body["order_configuration"]["market_market_ioc"]["quote_size"] == "617.27"
+
+
 def test_place_stop_limit_buy_payload(cdp_key: CDPKey) -> None:
     session = _mock_session(200, {"success": True, "order_id": "xyz"})
     client = CoinbaseClient(cdp_key, session=session)

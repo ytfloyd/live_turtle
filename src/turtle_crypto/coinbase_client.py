@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any, Final, Literal
 
 import requests
@@ -268,6 +268,13 @@ class CoinbaseClient:
         """
         if quote_size_usd <= 0:
             raise CoinbaseClientError(f"quote_size_usd must be positive, got {quote_size_usd}")
+        # Coinbase requires quote_size rounded to the quote currency's precision
+        # (2 decimal places for USD). Truncate down to avoid overspending.
+        rounded_quote = quote_size_usd.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        if rounded_quote <= 0:
+            raise CoinbaseClientError(
+                f"quote_size_usd rounds to zero at 2dp: {quote_size_usd}"
+            )
         order_id = client_order_id or str(uuid.uuid4())
         body: dict[str, Any] = {
             "client_order_id": order_id,
@@ -275,7 +282,7 @@ class CoinbaseClient:
             "side": "BUY",
             "order_configuration": {
                 "market_market_ioc": {
-                    "quote_size": _decimal_to_str(quote_size_usd),
+                    "quote_size": _decimal_to_str(rounded_quote),
                 }
             },
             "retail_portfolio_id": retail_portfolio_id,
