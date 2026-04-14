@@ -226,20 +226,36 @@ class Executor:
             )
 
     # ------------------------------------------------------------------
+    # Product ID mapping (scan on USD, execute on USDC)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _execution_product_id(product_id: str) -> str:
+        """
+        Map analysis product_id to execution product_id.
+
+        Scanner runs on XXX-USD pairs (larger universe, more liquid candle
+        data). Execution runs on XXX-USDC pairs (portfolio holds USDC).
+        USDC is 1:1 with USD on Coinbase so quote_size is identical.
+        """
+        if product_id.endswith("-USD"):
+            return product_id[:-4] + "-USDC"
+        return product_id
+
+    # ------------------------------------------------------------------
     # Order placement
     # ------------------------------------------------------------------
 
     def _build_intent(self, order: TradeOrder, client_order_id: str) -> dict[str, Any]:
         """Build the request body we'd POST to /orders, as a dict."""
+        exec_pid = self._execution_product_id(order.product_id)
         if order.order_type == "MARKET_BUY":
             return {
                 "client_order_id": client_order_id,
-                "product_id": order.product_id,
+                "product_id": exec_pid,
                 "side": "BUY",
                 "order_configuration": {
                     "market_market_ioc": {
-                        # Note: we instruct Coinbase with the USD notional,
-                        # NOT the base size — avoids client-side rounding.
                         "quote_size": _dec_str(order.notional_usd),
                     }
                 },
@@ -252,7 +268,7 @@ class Executor:
                 )
             return {
                 "client_order_id": client_order_id,
-                "product_id": order.product_id,
+                "product_id": exec_pid,
                 "side": "BUY",
                 "order_configuration": {
                     "stop_limit_stop_limit_gtc": {
@@ -312,10 +328,11 @@ class Executor:
 
         # Live order. Any exception => halt the executor so subsequent orders
         # in the same run are refused until the user investigates.
+        exec_pid = self._execution_product_id(order.product_id)
         try:
             if order.order_type == "MARKET_BUY":
                 response = self._client.place_market_buy(
-                    product_id=order.product_id,
+                    product_id=exec_pid,
                     quote_size_usd=order.notional_usd,
                     retail_portfolio_id=self._portfolio_uuid,
                     client_order_id=client_order_id,
@@ -326,7 +343,7 @@ class Executor:
                         f"stop-limit {order.asset} missing trigger/limit prices"
                     )
                 response = self._client.place_stop_limit_buy(
-                    product_id=order.product_id,
+                    product_id=exec_pid,
                     base_size=order.base_size,
                     limit_price=order.stop_limit_price,
                     stop_price=order.stop_trigger_price,
