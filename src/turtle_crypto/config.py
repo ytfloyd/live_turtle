@@ -108,6 +108,10 @@ BUY_STOP_TRIGGER_CHANNEL_PCT: Decimal = Decimal("85")
 # WATCH range lower bound: S1 channel % >= 75.
 WATCH_CHANNEL_PCT: Decimal = Decimal("75")
 
+# Slippage tolerance on stop-loss sell orders: limit = stop * (1 - slippage).
+# 0.5% below stop to ensure fills on fast drops.
+STOP_LOSS_SLIPPAGE: Decimal = Decimal("0.005")
+
 # Slippage tolerance on stop-limit buy orders: limit = stop * (1 + slippage).
 STOP_LIMIT_SLIPPAGE: Decimal = Decimal("0.005")
 

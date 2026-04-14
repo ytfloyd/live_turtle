@@ -330,6 +330,48 @@ class CoinbaseClient:
         }
         return self._signed_post(PRIVATE_ORDERS_PATH, body)
 
+    def place_stop_limit_sell(
+        self,
+        *,
+        product_id: str,
+        base_size: Decimal,
+        limit_price: Decimal,
+        stop_price: Decimal,
+        retail_portfolio_id: str,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Place a stop-limit SELL (protective stop-loss). Triggers when the
+        market drops to `stop_price`, then sells at `limit_price` or better.
+
+        Uses stop_direction=STOP_DIRECTION_STOP_DOWN — the order arms once
+        the market trades down through `stop_price`.
+
+        `limit_price` should be slightly below `stop_price` to allow for
+        slippage and ensure the fill (e.g., stop * 0.995).
+        """
+        if base_size <= 0:
+            raise CoinbaseClientError(f"base_size must be positive, got {base_size}")
+        if limit_price <= 0 or stop_price <= 0:
+            raise CoinbaseClientError("limit_price and stop_price must be positive")
+
+        order_id = client_order_id or str(uuid.uuid4())
+        body: dict[str, Any] = {
+            "client_order_id": order_id,
+            "product_id": product_id,
+            "side": "SELL",
+            "order_configuration": {
+                "stop_limit_stop_limit_gtc": {
+                    "base_size": _decimal_to_str(base_size),
+                    "limit_price": _decimal_to_str(limit_price),
+                    "stop_price": _decimal_to_str(stop_price),
+                    "stop_direction": _STOP_DIRECTION_DOWN,
+                }
+            },
+            "retail_portfolio_id": retail_portfolio_id,
+        }
+        return self._signed_post(PRIVATE_ORDERS_PATH, body)
+
 
 def _decimal_to_str(value: Decimal) -> str:
     """

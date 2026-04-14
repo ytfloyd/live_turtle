@@ -33,6 +33,7 @@ from turtle_crypto.config import (
     MAX_DAILY_ORDERS,
     MAX_ORDER_NOTIONAL_USD,
     MAX_PORTFOLIO_HEAT_USD,
+    STOP_LOSS_SLIPPAGE,
 )
 from turtle_crypto.trade_sheet import TradeOrder
 
@@ -434,8 +435,91 @@ class Executor:
             row_id,
             order.notional_usd,
         )
+
+        # Place protective stop-loss immediately after a buy fill.
+        if order.order_type == "MARKET_BUY":
+            self._place_stop_loss(order, exec_pid)
+
         return ExecutionResult(
             order=order, status="filled", response=response, error_text=None
+        )
+
+    def _place_stop_loss(self, order: TradeOrder, exec_pid: str) -> None:
+        """
+        Place a stop-limit sell at the 2N stop price immediately after a fill.
+
+        This is the Turtle hard stop: if price drops to stop_loss_price, sell
+        everything. Limit price is set slightly below stop to ensure fill on
+        fast moves.
+
+        A failed stop-loss placement logs a warning but does NOT halt the
+        executor — the buy already filled, and halting would prevent placing
+        stops on subsequent fills. The operator should review the audit log
+        and place the stop manually if this fails.
+        """
+        stop_price = order.stop_loss_price
+        limit_price = stop_price * (Decimal("1") - STOP_LOSS_SLIPPAGE)
+        stop_order_id = f"turtle-stop-{uuid.uuid4().hex}"
+
+        stop_intent = {
+            "type": "STOP_LOSS",
+            "parent_product_id": order.product_id,
+            "exec_product_id": exec_pid,
+            "base_size": _dec_str(order.base_size),
+            "stop_price": _dec_str(stop_price),
+            "limit_price": _dec_str(limit_price),
+        }
+        stop_row_id = self._audit.insert_intent(
+            product_id=order.product_id,
+            client_order_id=stop_order_id,
+            intent=stop_intent,
+            dry_run=self._dry_run,
+        )
+
+        if self._dry_run:
+            self._audit.update_status(stop_row_id, status="dry_run")
+            logger.info(
+                "DRY RUN — STOP_LOSS %s stop=$%s limit=$%s (audit id %d)",
+                exec_pid, stop_price, limit_price, stop_row_id,
+            )
+            return
+
+        try:
+            stop_response = self._client.place_stop_limit_sell(
+                product_id=exec_pid,
+                base_size=order.base_size,
+                limit_price=limit_price,
+                stop_price=stop_price,
+                retail_portfolio_id=self._portfolio_uuid,
+                client_order_id=stop_order_id,
+            )
+        except CoinbaseClientError as exc:
+            self._audit.update_status(
+                stop_row_id, status="errored", error_text=str(exc)
+            )
+            logger.error(
+                "STOP_LOSS FAILED for %s: %s — place manually at stop=$%s",
+                exec_pid, exc, stop_price,
+            )
+            return
+
+        if not isinstance(stop_response, dict) or stop_response.get("success") is False:
+            err = stop_response if not isinstance(stop_response, dict) else (
+                stop_response.get("error_response") or stop_response
+            )
+            self._audit.update_status(
+                stop_row_id, status="rejected", response=stop_response, error_text=str(err)
+            )
+            logger.error(
+                "STOP_LOSS REJECTED for %s: %s — place manually at stop=$%s",
+                exec_pid, err, stop_price,
+            )
+            return
+
+        self._audit.update_status(stop_row_id, status="filled", response=stop_response)
+        logger.info(
+            "STOP_LOSS placed — %s stop=$%s limit=$%s (audit id %d)",
+            exec_pid, stop_price, limit_price, stop_row_id,
         )
 
 
