@@ -69,7 +69,7 @@ def main() -> int:
         logger.error("sanity check failed: %s", exc)
         return 2
 
-    all_orders = list(sheet.active_orders) + list(sheet.resting_orders)
+    all_orders = list(sheet.active_orders)
     if not all_orders:
         logger.info("no orders to simulate")
         audit.close()

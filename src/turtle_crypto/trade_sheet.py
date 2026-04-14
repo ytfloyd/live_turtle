@@ -41,14 +41,12 @@ from tabulate import tabulate
 
 from turtle_crypto.config import (
     ACCOUNT_SIZE,
-    BUY_STOP_TRIGGER_CHANNEL_PCT,
     HALF_UNIT_MULTIPLIER,
     MAX_ATR_PCT,
     MAX_PORTFOLIO_HEAT,
     MIN_24H_VOL_USD,
     RISK_PER_UNIT,
     S2_EXTENDED_CHANNEL_PCT,
-    STOP_LIMIT_SLIPPAGE,
     STOP_LOSS_ATR_MULTIPLE,
     STRONG_TREND_55D_RETURN,
     WATCH_CHANNEL_PCT,
@@ -127,7 +125,6 @@ class TradeSheet:
 
     rows: list[TradeSheetRow]
     active_orders: list[TradeOrder]
-    resting_orders: list[TradeOrder]
     total_notional_usd: Decimal
     total_risk_usd: Decimal
     heat_fraction: Decimal
@@ -257,25 +254,8 @@ def classify(row: pd.Series) -> Classification | None:
             order_type="MARKET_BUY",
         )
 
-    # BUY-STOP bucket: S1 channel ≥ 85% and not through yet.
-    if s1_pct >= BUY_STOP_TRIGGER_CHANNEL_PCT:
-        if strong_trend:
-            return Classification(
-                label="BUY-STOP",
-                color=C.CYAN,
-                priority=2,
-                size_multiplier=Decimal("1"),
-                order_type="STOP_LIMIT_BUY",
-            )
-        return Classification(
-            label="BUY-STOP WEAK",
-            color=C.CYAN,
-            priority=4,
-            size_multiplier=HALF_UNIT_MULTIPLIER,
-            order_type="STOP_LIMIT_BUY",
-        )
-
-    # 5. WATCH: S1 channel 75–85%, no order.
+    # Approaching breakout (≥75% of channel) but not through yet → WATCH only.
+    # No resting orders. Check again at the next daily close.
     if s1_pct >= WATCH_CHANNEL_PCT:
         return Classification(
             label="WATCH",
@@ -419,50 +399,24 @@ def build_trade_sheet(
                 priority=classification.priority,
                 rank_score=rank_score,
             )
-        elif classification.order_type == "STOP_LIMIT_BUY":
-            # Trigger on the 20-day high (S1 high).
-            stop_trigger_price = s1_high
-            stop_limit_price = s1_high * (Decimal("1") + STOP_LIMIT_SLIPPAGE)
-            # Rebuild stop_loss against the trigger (more conservative).
-            stop_loss_price_for_stop = stop_trigger_price - STOP_LOSS_ATR_MULTIPLE * atr
-            order = TradeOrder(
-                asset=base,
-                product_id=pid,
-                order_type="STOP_LIMIT_BUY",
-                base_size=base_size,
-                notional_usd=base_size * stop_trigger_price,
-                risk_usd=risk_usd,
-                entry_price=stop_trigger_price,
-                stop_loss_price=stop_loss_price_for_stop,
-                stop_trigger_price=stop_trigger_price,
-                stop_limit_price=stop_limit_price,
-                classification=classification.label,
-                priority=classification.priority,
-                rank_score=rank_score,
-            )
         else:
             rows.append(base_row)
             continue
 
         rows.append(_replace(base_row, order=order))
 
-    # Split into active vs resting, and compute totals.
+    # Collect market orders only — no resting stop-limits in v1.
+    # Approaching breakouts stay in WATCH; check again at next daily close.
     active_orders: list[TradeOrder] = []
-    resting_orders: list[TradeOrder] = []
     for r in rows:
-        if r.order is None:
-            continue
-        if r.order.order_type == "MARKET_BUY":
+        if r.order is not None and r.order.order_type == "MARKET_BUY":
             active_orders.append(r.order)
-        elif r.order.order_type == "STOP_LIMIT_BUY":
-            resting_orders.append(r.order)
 
     # Sort by rank_score descending — strongest signals first.
     active_orders.sort(key=lambda o: -o.rank_score)
-    resting_orders.sort(key=lambda o: -o.rank_score)
 
-    total_notional = sum((o.notional_usd for o in active_orders + resting_orders), Decimal("0"))
-    total_risk = sum((o.risk_usd for o in active_orders + resting_orders), Decimal("0"))
+    total_notional = sum((o.notional_usd for o in active_orders), Decimal("0"))
+    total_risk = sum((o.risk_usd for o in active_orders), Decimal("0"))
     heat_cap_usd = account_size * MAX_PORTFOLIO_HEAT
     heat_fraction = (total_risk / account_size) if account_size > 0 else Decimal("0")
     heat_exceeded = total_risk > heat_cap_usd
@@ -474,7 +428,6 @@ def build_trade_sheet(
     return TradeSheet(
         rows=rows,
         active_orders=active_orders,
-        resting_orders=resting_orders,
         total_notional_usd=total_notional,
         total_risk_usd=total_risk,
         heat_fraction=heat_fraction,
@@ -520,33 +473,6 @@ def print_trade_sheet(sheet: TradeSheet) -> None:
             tabulate(
                 table,
                 headers=["asset", "class", "size", "entry", "stop (2N)", "notional", "risk", "%acct", "rank"],
-                tablefmt="simple",
-            )
-        )
-
-    print(f"\n{C.BOLD}=== RESTING BUY-STOPS (stop-limit orders) ==={C.RESET}")
-    if not sheet.resting_orders:
-        print("(none)")
-    else:
-        table = []
-        for o in sheet.resting_orders:
-            table.append(
-                [
-                    o.asset,
-                    o.classification,
-                    f"{o.base_size:f}",
-                    f"${o.stop_trigger_price:,.4f}",
-                    f"${o.stop_limit_price:,.4f}",
-                    f"${o.stop_loss_price:,.4f}",
-                    f"${o.notional_usd:,.2f}",
-                    f"${o.risk_usd:,.2f}",
-                    f"{o.rank_score:.1f}",
-                ]
-            )
-        print(
-            tabulate(
-                table,
-                headers=["asset", "class", "size", "trigger", "limit", "stop (2N)", "notional", "risk", "rank"],
                 tablefmt="simple",
             )
         )

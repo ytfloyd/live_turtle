@@ -147,7 +147,7 @@ def main() -> int:
         audit.close()
         return 2
 
-    all_orders = list(sheet.active_orders) + list(sheet.resting_orders)
+    all_orders = list(sheet.active_orders)
     if not all_orders:
         print("\nNo orders to execute.")
         audit.close()

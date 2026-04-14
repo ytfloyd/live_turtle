@@ -46,10 +46,9 @@ def main() -> int:
     print_trade_sheet(sheet)
 
     logger.info(
-        "scanner done — %d pairs, %d active, %d resting",
+        "scanner done — %d pairs, %d active entries",
         len(df),
         len(sheet.active_orders),
-        len(sheet.resting_orders),
     )
     return 0
 

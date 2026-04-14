@@ -199,22 +199,14 @@ def test_classify_s1_weak_half_unit() -> None:
     assert c.size_multiplier == Decimal("0.5")
 
 
-def test_classify_buy_stop_strong() -> None:
+def test_classify_approaching_breakout_is_watch_only() -> None:
+    # At 90% of channel but no breakout → WATCH (no order, check next close).
     r = _row(s1_signal="—", s2_signal="—", s1_channel_pct=90.0, return_55d=0.10)
     c = classify(r)
     assert c is not None
-    assert c.label == "BUY-STOP"
-    assert c.priority == 2
-    assert c.order_type == "STOP_LIMIT_BUY"
-
-
-def test_classify_buy_stop_weak() -> None:
-    r = _row(s1_signal="—", s2_signal="—", s1_channel_pct=90.0, return_55d=0.01)
-    c = classify(r)
-    assert c is not None
-    assert c.label == "BUY-STOP WEAK"
-    assert c.priority == 4
-    assert c.size_multiplier == Decimal("0.5")
+    assert c.label == "WATCH"
+    assert c.order_type is None
+    assert c.size_multiplier == Decimal("0")
 
 
 def test_classify_watch_range() -> None:
