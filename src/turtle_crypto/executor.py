@@ -151,20 +151,14 @@ class Executor:
             )
         logger.info("Portfolio binding OK — UUID matches")
 
-        # 3) Balance check. The accounts endpoint returns ALL accounts across
-        #    all portfolios (portfolio-scoped queries return 403 on some key
-        #    configurations). We check that total USD+USDC across all portfolios
-        #    is at least ACCOUNT_SIZE — this confirms sufficient funds exist.
-        #    We skip the upper-bound check since other portfolios inflate the total.
-        #    The real safety is retail_portfolio_id on every order.
+        # 3) Balance check. Log the available USD+USDC for awareness.
+        #    After deploying capital into positions, cash will be less than
+        #    ACCOUNT_SIZE — that's expected. The real safety is per-order
+        #    notional caps and heat caps, plus retail_portfolio_id binding.
         balance_usd = self._sum_usd_from_accounts(accounts)
-        lower = ACCOUNT_SIZE * (Decimal("1") - ACCOUNT_BALANCE_TOLERANCE)
-        if balance_usd < lower:
-            raise SanityCheckError(
-                f"Total USD+USDC balance ${balance_usd:,.2f} below minimum "
-                f"${lower:,.2f} (ACCOUNT_SIZE=${ACCOUNT_SIZE}). Refusing to run."
-            )
-        logger.info("Balance OK — total USD+USDC = $%s (>= $%s required)", balance_usd, lower)
+        logger.info("Available USD+USDC cash: $%s", balance_usd)
+        if balance_usd <= 0:
+            raise SanityCheckError("No USD or USDC balance available. Cannot place orders.")
 
         # 4) Audit DB writable. We'll insert a sentinel intent and roll it back
         #    by updating to a recognizable status; the row is left in place as
