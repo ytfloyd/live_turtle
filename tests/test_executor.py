@@ -193,7 +193,7 @@ def test_notional_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=False)
     ex.run_sanity_checks()
-    too_big = _make_order(notional=Decimal("2100"))  # > 2000 cap
+    too_big = _make_order(notional=Decimal("4100"))  # > 4000 cap
     with pytest.raises(CapViolation, match="notional"):
         ex.place_order(too_big)
     client.place_market_buy.assert_not_called()
@@ -203,8 +203,8 @@ def test_heat_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=True)
     ex.run_sanity_checks()
-    # 20 $100-risk orders = $2000 = exactly the cap. The 21st should fail.
-    for i in range(20):
+    # 40 $100-risk orders = $4000 = exactly the cap. The 41st should fail.
+    for i in range(40):
         ex.place_order(_make_order(product_id=f"SYM{i}-USD"))
     with pytest.raises(CapViolation, match="heat cap"):
         ex.place_order(_make_order(product_id="OVER-USD"))

@@ -289,6 +289,63 @@ class CoinbaseClient:
         }
         return self._signed_post(PRIVATE_ORDERS_PATH, body)
 
+    def place_market_sell(
+        self,
+        *,
+        product_id: str,
+        base_size: Decimal,
+        retail_portfolio_id: str,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Place a MARKET IOC sell for a specific base quantity. Used for
+        Donchian low exits — sell the entire position at market.
+        """
+        if base_size <= 0:
+            raise CoinbaseClientError(f"base_size must be positive, got {base_size}")
+        order_id = client_order_id or str(uuid.uuid4())
+        body: dict[str, Any] = {
+            "client_order_id": order_id,
+            "product_id": product_id,
+            "side": "SELL",
+            "order_configuration": {
+                "market_market_ioc": {
+                    "base_size": _decimal_to_str(base_size),
+                }
+            },
+            "retail_portfolio_id": retail_portfolio_id,
+        }
+        return self._signed_post(PRIVATE_ORDERS_PATH, body)
+
+    def cancel_orders(self, order_ids: list[str]) -> dict[str, Any]:
+        """Cancel one or more orders by their server-side order IDs."""
+        if not order_ids:
+            raise CoinbaseClientError("order_ids must be non-empty")
+        body = {"order_ids": order_ids}
+        path = f"{PRIVATE_ORDERS_PATH}/batch_cancel"
+        return self._signed_post(path, body)
+
+    def list_orders(
+        self,
+        *,
+        product_id: str | None = None,
+        order_status: list[str] | None = None,
+        retail_portfolio_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List orders, optionally filtered by product and status."""
+        params: dict[str, Any] = {}
+        if product_id:
+            params["product_id"] = product_id
+        if order_status:
+            params["order_status"] = order_status
+        if retail_portfolio_id:
+            params["retail_portfolio_id"] = retail_portfolio_id
+        payload = self._signed_get(PRIVATE_ORDERS_PATH, params=params)
+        orders = _require_field(payload, "orders", "orders response")
+        if not isinstance(orders, list):
+            raise CoinbaseClientError("'orders' must be a list")
+        return orders
+
     def place_stop_limit_buy(
         self,
         *,

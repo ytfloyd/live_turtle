@@ -35,18 +35,15 @@ from turtle_crypto.trade_sheet import (
 
 def test_canonical_btc_example() -> None:
     """
-    From the spec: close=$72,000, atr=$2,400, account=$10,000.
-    Expected: 1 unit ≈ 0.0208 BTC ≈ $1,500 notional.
+    Canonical BTC sizing at 0.5% risk: close=$72,000, atr=$2,400, account=$20,000.
 
     Hand math:
-        unit_raw = 10000 * 0.01 / (2 * 2400) = 100 / 4800 = 0.02083333...
-        base_increment for BTC on Coinbase is 0.00000001 → essentially no
-        rounding at this resolution.
+        unit_raw = 20000 * 0.005 / (2 * 2400) = 100 / 4800 = 0.02083333...
         notional = 0.02083333... * 72000 = ~$1,500
-        risk = 0.02083... * 2 * 2400 = ~$100 ✓ (1% of account)
+        risk = 0.02083... * 2 * 2400 = ~$100 (0.5% of $20k)
     """
     base_size, notional, risk = compute_unit_size(
-        account_size=Decimal("10000"),
+        account_size=Decimal("20000"),
         atr=Decimal("2400"),
         close=Decimal("72000"),
         base_increment=Decimal("0.00000001"),
@@ -56,17 +53,16 @@ def test_canonical_btc_example() -> None:
     assert abs(base_size - Decimal("0.02083333")) <= Decimal("0.00000001")
     # Notional should be within a few cents of $1,500 (rounding from 8dp).
     assert abs(notional - Decimal("1500")) < Decimal("0.01")
-    # Risk is base_size * 2 * ATR — effectively 1% of account.
+    # Risk is base_size * 2 * ATR — 0.5% of $20k account = $100.
     assert abs(risk - Decimal("100")) < Decimal("0.01")
 
 
-def test_risk_always_equals_1pct_before_rounding() -> None:
+def test_risk_equals_half_pct_before_rounding() -> None:
     """
-    For any non-degenerate inputs, raw risk = account * RISK_PER_UNIT exactly.
-    Rounding can only shave a tiny amount off.
+    At 0.5% risk on $20k: raw risk = $20,000 * 0.005 = $100.
     """
     base_size, _notional, risk = compute_unit_size(
-        account_size=Decimal("10000"),
+        account_size=Decimal("20000"),
         atr=Decimal("5"),
         close=Decimal("100"),
         base_increment=Decimal("0.001"),
@@ -79,14 +75,14 @@ def test_risk_always_equals_1pct_before_rounding() -> None:
 
 def test_half_unit_multiplier() -> None:
     full, _, _ = compute_unit_size(
-        account_size=Decimal("10000"),
+        account_size=Decimal("20000"),
         atr=Decimal("5"),
         close=Decimal("100"),
         base_increment=Decimal("0.001"),
         base_min_size=Decimal("0.001"),
     )
     half, _, _ = compute_unit_size(
-        account_size=Decimal("10000"),
+        account_size=Decimal("20000"),
         atr=Decimal("5"),
         close=Decimal("100"),
         base_increment=Decimal("0.001"),
@@ -99,7 +95,7 @@ def test_half_unit_multiplier() -> None:
 def test_zero_returned_below_min_size() -> None:
     # A pair where one full unit is below the min trade size: expect zeros.
     base_size, notional, risk = compute_unit_size(
-        account_size=Decimal("10000"),
+        account_size=Decimal("20000"),
         atr=Decimal("100000"),  # enormous ATR → tiny unit
         close=Decimal("100000"),
         base_increment=Decimal("0.001"),
@@ -120,7 +116,7 @@ def test_base_increment_rounds_down() -> None:
 def test_compute_unit_size_rejects_bad_inputs() -> None:
     with pytest.raises(ValueError, match="ATR"):
         compute_unit_size(
-            account_size=Decimal("10000"),
+            account_size=Decimal("20000"),
             atr=Decimal("0"),
             close=Decimal("100"),
             base_increment=Decimal("0.01"),
@@ -128,7 +124,7 @@ def test_compute_unit_size_rejects_bad_inputs() -> None:
         )
     with pytest.raises(ValueError, match="close"):
         compute_unit_size(
-            account_size=Decimal("10000"),
+            account_size=Decimal("20000"),
             atr=Decimal("5"),
             close=Decimal("0"),
             base_increment=Decimal("0.01"),
@@ -260,7 +256,7 @@ def test_build_sheet_produces_typed_orders() -> None:
             "base_min_size": "0.00000001",
         }
     }
-    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
+    sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
     assert len(sheet.active_orders) == 1
     order = sheet.active_orders[0]
     assert order.asset == "BTC"
@@ -290,7 +286,7 @@ def test_build_sheet_skips_low_volume() -> None:
         ]
     )
     details = {"THIN-USD": {"base_increment": "0.01", "base_min_size": "0.01"}}
-    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
+    sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
     assert len(sheet.active_orders) == 0
     assert len(sheet.rows) == 1
     assert "24h vol" in (sheet.rows[0].skip_reason or "")
@@ -314,7 +310,7 @@ def test_build_sheet_skips_too_volatile() -> None:
         ]
     )
     details = {"VOL-USD": {"base_increment": "0.01", "base_min_size": "0.01"}}
-    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
+    sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
     assert len(sheet.active_orders) == 0
     assert "ATR" in (sheet.rows[0].skip_reason or "")
 
@@ -339,7 +335,7 @@ def test_build_sheet_skips_oversize_notional() -> None:
         ]
     )
     details = {"FAT-USD": {"base_increment": "0.001", "base_min_size": "0.001"}}
-    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
+    sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
     # Raw math: unit_raw = 100 / (2*0.05) = 1000 base; notional = 100,000.
     # That blows the $1,500 cap per order.
     assert len(sheet.active_orders) == 0
@@ -372,15 +368,17 @@ def test_build_sheet_heat_aggregation() -> None:
         "BTC-USD": {"base_increment": "0.00000001", "base_min_size": "0.00000001"},
         "ETH-USD": {"base_increment": "0.00000001", "base_min_size": "0.00000001"},
     }
-    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
+    sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
     assert len(sheet.active_orders) == 2
     assert abs(sheet.total_risk_usd - Decimal("200")) < Decimal("0.01")
     assert not sheet.heat_cap_exceeded
     assert sheet.heat_scale_ratio == Decimal("1")
 
 
-def test_build_sheet_heat_cap_breach_reports_scale_down() -> None:
-    # Construct 30 fixture pairs each with ~1% risk → 30% total → breach of 20%.
+def test_build_sheet_deployment_cap_limits_orders() -> None:
+    # With $20k account: deployment cap = 60% = $12,000.
+    # Each order at close=$100, atr=$5 → notional ~$1,000.
+    # Should cap at ~12 orders even though 30 breakouts exist.
     rows = []
     details = {}
     for i in range(30):
@@ -402,8 +400,8 @@ def test_build_sheet_heat_cap_breach_reports_scale_down() -> None:
         )
         details[pid] = {"base_increment": "0.001", "base_min_size": "0.001"}
     df = _build_fixture_df(rows)
-    sheet = build_trade_sheet(df, details, account_size=Decimal("10000"))
-    assert sheet.heat_cap_exceeded
-    # Total risk should be ~20 * $100 = $2000 in principle; cap = $1200.
-    assert sheet.heat_scale_ratio < Decimal("1")
-    assert sheet.heat_scale_ratio > Decimal("0")
+    sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
+    # 30 breakouts but deployment cap limits to ~12 orders.
+    assert len(sheet.active_orders) < 30
+    assert len(sheet.active_orders) > 0
+    assert sheet.total_notional_usd <= Decimal("12000")
