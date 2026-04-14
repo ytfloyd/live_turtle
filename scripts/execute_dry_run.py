@@ -70,12 +70,16 @@ def main() -> int:
         return 2
 
     all_orders = list(sheet.active_orders)
+
+    # Filter out assets already in the portfolio.
+    all_orders = executor.filter_already_held(all_orders)
+
     if not all_orders:
-        logger.info("no orders to simulate")
+        logger.info("no new orders to simulate (all signals already held or none active)")
         audit.close()
         return 0
 
-    print(f"\n=== DRY-RUN SIMULATING {len(all_orders)} ORDER(S) ===")
+    print(f"\n=== DRY-RUN SIMULATING {len(all_orders)} NEW ORDER(S) ===")
     for order in all_orders:
         intent = executor._build_intent(order, client_order_id="dry-preview")  # type: ignore[attr-defined]
         print()

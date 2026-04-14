@@ -128,6 +128,14 @@ class Executor:
             raise SanityCheckError("Accounts response did not return a list")
         logger.info("Auth OK — %d accounts visible", len(accounts))
 
+        # Parse existing holdings so we can skip assets already in the portfolio.
+        self._existing_holdings = self._parse_holdings(accounts)
+        if self._existing_holdings:
+            held = ", ".join(
+                f"{cur}={bal}" for cur, bal in sorted(self._existing_holdings.items())
+            )
+            logger.info("Existing holdings: %s", held)
+
         # 2) Portfolio must exist in the API key's allowed set.
         try:
             portfolios = self._client.get_portfolios()
@@ -198,6 +206,52 @@ class Executor:
                 except (ArithmeticError, ValueError):
                     continue
         return total
+
+    @staticmethod
+    def _parse_holdings(accounts: list[dict[str, Any]]) -> dict[str, Decimal]:
+        """
+        Extract non-zero crypto holdings from the accounts list.
+
+        Returns {currency: balance} for every currency with a positive balance,
+        excluding USD/USDC (those are cash, not positions).
+        """
+        holdings: dict[str, Decimal] = {}
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            bal = account.get("available_balance")
+            if not isinstance(bal, dict):
+                continue
+            currency = bal.get("currency")
+            value_raw = bal.get("value")
+            if not currency or currency in Executor._USD_EQUIVALENT_CURRENCIES:
+                continue
+            if value_raw is None:
+                continue
+            try:
+                amount = Decimal(str(value_raw))
+            except (ArithmeticError, ValueError):
+                continue
+            if amount > 0:
+                holdings[currency] = amount
+        return holdings
+
+    def filter_already_held(self, orders: list[TradeOrder]) -> list[TradeOrder]:
+        """
+        Remove orders for assets the portfolio already holds. Returns the
+        filtered list and logs each skipped asset.
+        """
+        filtered: list[TradeOrder] = []
+        for order in orders:
+            if order.asset in self._existing_holdings:
+                held = self._existing_holdings[order.asset]
+                logger.info(
+                    "SKIP %s — already holding %s %s",
+                    order.product_id, held, order.asset,
+                )
+                continue
+            filtered.append(order)
+        return filtered
 
     # ------------------------------------------------------------------
     # Hard caps

@@ -148,12 +148,16 @@ def main() -> int:
         return 2
 
     all_orders = list(sheet.active_orders)
+
+    # Filter out assets already in the portfolio.
+    all_orders = executor.filter_already_held(all_orders)
+
     if not all_orders:
-        print("\nNo orders to execute.")
+        print("\nNo new orders to execute (all signals already held or none active).")
         audit.close()
         return 0
 
-    print(f"\n=== LIVE EXECUTION — {len(all_orders)} ORDER(S) TO PROCESS ===")
+    print(f"\n=== LIVE EXECUTION — {len(all_orders)} NEW ORDER(S) TO PROCESS ===")
 
     # Show all orders as a summary table first.
     from tabulate import tabulate as _tabulate
