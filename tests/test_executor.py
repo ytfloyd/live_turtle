@@ -193,7 +193,7 @@ def test_notional_cap_fires_before_network(audit: AuditStore) -> None:
     client = _sane_client()
     ex = Executor(client=client, audit=audit, portfolio_uuid=PORTFOLIO_UUID, dry_run=False)
     ex.run_sanity_checks()
-    too_big = _make_order(notional=Decimal("1600"))  # > 1500 cap
+    too_big = _make_order(notional=Decimal("2100"))  # > 2000 cap
     with pytest.raises(CapViolation, match="notional"):
         ex.place_order(too_big)
     client.place_market_buy.assert_not_called()

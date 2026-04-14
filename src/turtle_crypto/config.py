@@ -115,7 +115,7 @@ STOP_LIMIT_SLIPPAGE: Decimal = Decimal("0.005")
 # Executor hard caps (enforced inside the executor even in dry-run mode)
 # ---------------------------------------------------------------------------
 
-MAX_ORDER_NOTIONAL_USD: Decimal = Decimal("1500")
+MAX_ORDER_NOTIONAL_USD: Decimal = Decimal("2000")
 MAX_DAILY_ORDERS: int = 15
 MAX_PORTFOLIO_HEAT_USD: Decimal = Decimal("2000")
 
