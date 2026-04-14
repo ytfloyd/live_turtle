@@ -370,12 +370,12 @@ def build_trade_sheet(
             )
             continue
 
-        max_notional = account_size * Decimal("0.15")
+        max_notional = account_size * Decimal("0.20")
         if notional_usd > max_notional:
             rows.append(
                 _replace(
                     base_row,
-                    skip_reason=f"notional ${notional_usd:,.2f} > 15% cap ${max_notional:,.2f}",
+                    skip_reason=f"notional ${notional_usd:,.2f} > 20% cap ${max_notional:,.2f}",
                 )
             )
             continue

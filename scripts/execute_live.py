@@ -154,40 +154,78 @@ def main() -> int:
         return 0
 
     print(f"\n=== LIVE EXECUTION — {len(all_orders)} ORDER(S) TO PROCESS ===")
+
+    # Show all orders as a summary table first.
+    from tabulate import tabulate as _tabulate
+    summary_table = []
+    for o in all_orders:
+        summary_table.append([
+            o.asset,
+            o.classification,
+            f"${o.notional_usd:,.2f}",
+            f"${o.risk_usd:,.2f}",
+            f"${o.entry_price:,.4f}",
+            f"${o.stop_loss_price:,.4f}",
+            f"{o.rank_score:.1f}",
+        ])
+    print(_tabulate(
+        summary_table,
+        headers=["asset", "class", "notional", "risk", "entry", "stop (2N)", "rank"],
+        tablefmt="simple",
+    ))
+    total_n = sum(o.notional_usd for o in all_orders)
+    total_r = sum(o.risk_usd for o in all_orders)
+    print(f"\n  total notional  ${total_n:,.2f}   total risk  ${total_r:,.2f}")
+
     if args.auto:
-        print("  --auto flag set — confirmation prompts DISABLED")
+        print("  --auto flag set — executing all without confirmation")
+        choice = "EXECUTE ALL"
+    else:
+        print("\n  Type 'EXECUTE ALL' to confirm all orders")
+        print("  Type 'ABORT' to cancel")
+        print("  Type 'ONE-BY-ONE' for per-order confirmation")
+        try:
+            choice = input("\n  > ").strip()
+        except EOFError:
+            choice = "ABORT"
+
+    if choice == "ABORT":
+        logger.warning("user aborted")
+        audit.close()
+        return 0
+
+    one_by_one = choice == "ONE-BY-ONE"
+    if choice not in ("EXECUTE ALL", "ONE-BY-ONE"):
+        print("  (no match — must be 'EXECUTE ALL', 'ONE-BY-ONE', or 'ABORT')")
+        audit.close()
+        return 1
 
     results: list[tuple[str, str]] = []
     for order in all_orders:
-        _print_order_preview(order)
-
-        if args.auto:
-            choice = "EXECUTE"
-        else:
-            choice = _prompt_confirmation(order)
-
-        if choice == "ABORT":
-            logger.warning("user aborted run at %s", order.asset)
-            results.append((order.asset, "aborted"))
-            break
-        if choice == "SKIP":
-            audit.insert_intent(
-                product_id=order.product_id,
-                client_order_id="skipped-" + order.asset,
-                intent={"classification": order.classification},
-                dry_run=False,
-            )
-            # Mark the sentinel as user_skipped via a direct status update on
-            # the row we just inserted. Fetch most-recent matching.
-            recent = audit.recent_orders(limit=5)
-            if recent and recent[0].product_id == order.product_id:
-                audit.update_status(recent[0].id, status="user_skipped")
-            results.append((order.asset, "skipped"))
-            continue
+        if one_by_one:
+            _print_order_preview(order)
+            confirm = _prompt_confirmation(order)
+            if confirm == "ABORT":
+                logger.warning("user aborted run at %s", order.asset)
+                results.append((order.asset, "aborted"))
+                break
+            if confirm == "SKIP":
+                audit.insert_intent(
+                    product_id=order.product_id,
+                    client_order_id="skipped-" + order.asset,
+                    intent={"classification": order.classification},
+                    dry_run=False,
+                )
+                recent = audit.recent_orders(limit=5)
+                if recent and recent[0].product_id == order.product_id:
+                    audit.update_status(recent[0].id, status="user_skipped")
+                results.append((order.asset, "skipped"))
+                continue
 
         try:
             result = executor.place_order(order)
             results.append((order.asset, result.status))
+            print(f"  {order.asset:12s}  FILLED  ${order.notional_usd:,.2f}")
         except CapViolation as exc:
             logger.error("cap violation for %s: %s", order.asset, exc)
             results.append((order.asset, "cap_violation"))
