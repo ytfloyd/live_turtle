@@ -375,10 +375,9 @@ def test_build_sheet_heat_aggregation() -> None:
     assert sheet.heat_scale_ratio == Decimal("1")
 
 
-def test_build_sheet_deployment_cap_limits_orders() -> None:
-    # With $20k account: deployment cap = 60% = $12,000.
-    # Each order at close=$100, atr=$5 → notional ~$1,000.
-    # Should cap at ~12 orders even though 30 breakouts exist.
+def test_build_sheet_all_breakouts_enter_without_deployment_cap() -> None:
+    # With no deployment cap, all 30 breakouts should produce orders
+    # (heat cap is the only portfolio constraint).
     rows = []
     details = {}
     for i in range(30):
@@ -401,7 +400,4 @@ def test_build_sheet_deployment_cap_limits_orders() -> None:
         details[pid] = {"base_increment": "0.001", "base_min_size": "0.001"}
     df = _build_fixture_df(rows)
     sheet = build_trade_sheet(df, details, account_size=Decimal("20000"))
-    # 30 breakouts but deployment cap limits to ~12 orders.
-    assert len(sheet.active_orders) < 30
-    assert len(sheet.active_orders) > 0
-    assert sheet.total_notional_usd <= Decimal("12000")
+    assert len(sheet.active_orders) == 30

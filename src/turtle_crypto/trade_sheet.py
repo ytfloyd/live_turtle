@@ -43,7 +43,6 @@ from turtle_crypto.config import (
     ACCOUNT_SIZE,
     HALF_UNIT_MULTIPLIER,
     MAX_ATR_PCT,
-    MAX_DEPLOYMENT_PCT,
     MAX_PORTFOLIO_HEAT,
     MIN_24H_VOL_USD,
     RISK_PER_UNIT,
@@ -415,19 +414,6 @@ def build_trade_sheet(
 
     # Sort by rank_score descending — strongest signals first.
     active_orders.sort(key=lambda o: -o.rank_score)
-
-    # Enforce deployment cap: trim lowest-ranked orders if total notional
-    # would exceed MAX_DEPLOYMENT_PCT of account. This preserves dry powder
-    # for new breakouts on subsequent days.
-    max_deployment = account_size * MAX_DEPLOYMENT_PCT
-    capped_orders: list[TradeOrder] = []
-    running_notional = Decimal("0")
-    for o in active_orders:
-        if running_notional + o.notional_usd > max_deployment:
-            break
-        capped_orders.append(o)
-        running_notional += o.notional_usd
-    active_orders = capped_orders
 
     total_notional = sum((o.notional_usd for o in active_orders), Decimal("0"))
     total_risk = sum((o.risk_usd for o in active_orders), Decimal("0"))
