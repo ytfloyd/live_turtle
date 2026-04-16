@@ -120,19 +120,35 @@ def main() -> int:
         row = df[df["product_id"] == product_id]
 
         if row.empty:
-            # Not in scanner — use zero for ATR, skip P&L calc.
+            # Not in scanner universe — fetch live price directly.
+            try:
+                products = client.list_products_page(limit=1, offset=0)
+                # Use the public products endpoint with the specific product.
+                import requests
+                resp = requests.get(
+                    f"https://api.coinbase.com/api/v3/brokerage/market/products/{product_id}",
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    live_price = Decimal(str(data.get("price", "0")))
+                else:
+                    live_price = Decimal("0")
+            except Exception:
+                live_price = Decimal("0")
+
+            market_value = held_amount * live_price
+            total_market_value += market_value
             positions.append({
                 "asset": currency,
                 "amount": held_amount,
-                "close": Decimal("0"),
-                "market_value": Decimal("0"),
+                "close": live_price,
+                "market_value": market_value,
                 "atr": Decimal("0"),
                 "atr_pct": 0.0,
                 "stop_price": Decimal("0"),
                 "stop_distance_pct": 0.0,
                 "risk_usd": Decimal("0"),
-                "pnl_usd": Decimal("0"),
-                "pnl_pct": 0.0,
                 "s1_signal": "?",
                 "s1_channel_pct": 0.0,
                 "rank_score": 0.0,
