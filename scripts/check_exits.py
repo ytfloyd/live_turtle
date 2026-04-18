@@ -30,7 +30,7 @@ from _common import configure_logging, load_cdp_key_or_die, load_env_or_die, par
 from turtle_crypto.audit import AuditStore  # noqa: E402
 from turtle_crypto.coinbase_client import CoinbaseClient, CoinbaseClientError  # noqa: E402
 from turtle_crypto.config import DEFAULT_AUDIT_DB_PATH  # noqa: E402
-from turtle_crypto.scanner import run_scan  # noqa: E402
+from turtle_crypto.scanner import fetch_single_product_stats, run_scan  # noqa: E402
 
 
 def _floor_to_increment(value: Decimal, increment: Decimal) -> Decimal:
@@ -73,12 +73,20 @@ def main() -> int:
     for currency, held_amount in sorted(holdings.items()):
         product_id = f"{currency}-USD"
         row = df[df["product_id"] == product_id]
-        if row.empty:
-            continue
 
-        close = float(row.iloc[0]["close"])
-        s1_low = float(row.iloc[0]["s1_low"])
-        s1_signal = row.iloc[0]["s1_signal"]
+        if row.empty:
+            # Held position dropped out of scanner universe — fetch directly.
+            stats = fetch_single_product_stats(client, product_id)
+            if stats is None:
+                logger.warning("Could not fetch data for held position %s", product_id)
+                continue
+            close = stats["close"]
+            s1_low = stats["s1_low"]
+            s1_signal = stats["s1_signal"]
+        else:
+            close = float(row.iloc[0]["close"])
+            s1_low = float(row.iloc[0]["s1_low"])
+            s1_signal = row.iloc[0]["s1_signal"]
 
         # Exit condition: close at or below the 10-day Donchian low.
         if close <= s1_low or s1_signal == "EXIT":

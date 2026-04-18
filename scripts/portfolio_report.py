@@ -33,7 +33,7 @@ from turtle_crypto.config import (  # noqa: E402
     RISK_PER_UNIT,
     STOP_LOSS_ATR_MULTIPLE,
 )
-from turtle_crypto.scanner import run_scan  # noqa: E402
+from turtle_crypto.scanner import compute_rank_score, fetch_single_product_stats, run_scan  # noqa: E402
 
 # ANSI colors
 RESET = "\033[0m"
@@ -120,39 +120,50 @@ def main() -> int:
         row = df[df["product_id"] == product_id]
 
         if row.empty:
-            # Not in scanner universe — fetch live price directly.
-            try:
-                products = client.list_products_page(limit=1, offset=0)
-                # Use the public products endpoint with the specific product.
-                import requests
-                resp = requests.get(
-                    f"https://api.coinbase.com/api/v3/brokerage/market/products/{product_id}",
-                    timeout=10,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    live_price = Decimal(str(data.get("price", "0")))
-                else:
-                    live_price = Decimal("0")
-            except Exception:
-                live_price = Decimal("0")
-
-            market_value = held_amount * live_price
-            total_market_value += market_value
-            positions.append({
-                "asset": currency,
-                "amount": held_amount,
-                "close": live_price,
-                "market_value": market_value,
-                "atr": Decimal("0"),
-                "atr_pct": 0.0,
-                "stop_price": Decimal("0"),
-                "stop_distance_pct": 0.0,
-                "risk_usd": Decimal("0"),
-                "s1_signal": "?",
-                "s1_channel_pct": 0.0,
-                "rank_score": 0.0,
-            })
+            # Not in scanner universe — fetch candles directly for full stats.
+            stats = fetch_single_product_stats(client, product_id)
+            if stats is not None:
+                close = Decimal(str(stats["close"]))
+                atr = Decimal(str(stats["atr"]))
+                atr_pct = float(stats["atr_pct"])
+                s1_signal = stats["s1_signal"]
+                s1_pct = float(stats["s1_channel_pct"])
+                rank = float(compute_rank_score(stats, 0.0))
+                market_value = held_amount * close
+                stop_price = close - STOP_LOSS_ATR_MULTIPLE * atr
+                risk_usd = held_amount * STOP_LOSS_ATR_MULTIPLE * atr
+                stop_distance_pct = float((close - stop_price) / close * 100) if close > 0 else 0.0
+                total_market_value += market_value
+                total_risk += risk_usd
+                positions.append({
+                    "asset": currency,
+                    "amount": held_amount,
+                    "close": close,
+                    "market_value": market_value,
+                    "atr": atr,
+                    "atr_pct": atr_pct,
+                    "stop_price": stop_price,
+                    "stop_distance_pct": stop_distance_pct,
+                    "risk_usd": risk_usd,
+                    "s1_signal": s1_signal,
+                    "s1_channel_pct": s1_pct,
+                    "rank_score": rank,
+                })
+            else:
+                positions.append({
+                    "asset": currency,
+                    "amount": held_amount,
+                    "close": Decimal("0"),
+                    "market_value": Decimal("0"),
+                    "atr": Decimal("0"),
+                    "atr_pct": 0.0,
+                    "stop_price": Decimal("0"),
+                    "stop_distance_pct": 0.0,
+                    "risk_usd": Decimal("0"),
+                    "s1_signal": "?",
+                    "s1_channel_pct": 0.0,
+                    "rank_score": 0.0,
+                })
             continue
 
         close = Decimal(str(row.iloc[0]["close"]))

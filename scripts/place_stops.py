@@ -35,7 +35,7 @@ from turtle_crypto.config import (  # noqa: E402
     STOP_LOSS_ATR_MULTIPLE,
     STOP_LOSS_SLIPPAGE,
 )
-from turtle_crypto.scanner import run_scan  # noqa: E402
+from turtle_crypto.scanner import fetch_single_product_stats, run_scan  # noqa: E402
 
 
 def _floor_to_increment(value: Decimal, increment: Decimal) -> Decimal:
@@ -98,8 +98,16 @@ def main() -> int:
         product_id = f"{currency}-USD"
         row = df[df["product_id"] == product_id]
         if row.empty:
-            print(f"  {currency:10s}  SKIP — not in scanner universe (no ATR data)")
-            continue
+            # Held position dropped out of scanner — fetch directly.
+            stats = fetch_single_product_stats(client, product_id)
+            if stats is None:
+                print(f"  {currency:10s}  SKIP — could not fetch candle data")
+                continue
+            close = Decimal(str(stats["close"]))
+            atr = Decimal(str(stats["atr"]))
+        else:
+            close = Decimal(str(row.iloc[0]["close"]))
+            atr = Decimal(str(row.iloc[0]["atr"]))
 
         specs = product_specs.get(currency)
         if specs is None:
@@ -108,9 +116,6 @@ def main() -> int:
 
         quote_inc = specs["quote_increment"]
         base_inc = specs["base_increment"]
-
-        close = Decimal(str(row.iloc[0]["close"]))
-        atr = Decimal(str(row.iloc[0]["atr"]))
         raw_stop = close - STOP_LOSS_ATR_MULTIPLE * atr
         raw_limit = raw_stop * (Decimal("1") - STOP_LOSS_SLIPPAGE)
 

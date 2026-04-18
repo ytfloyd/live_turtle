@@ -495,6 +495,28 @@ def run_scan(client: CoinbaseClient | None = None) -> pd.DataFrame:
     return df
 
 
+def fetch_single_product_stats(
+    client: CoinbaseClient, product_id: str
+) -> dict[str, float] | None:
+    """
+    Fetch candles and compute Turtle stats for a single product, bypassing
+    the scanner's universe/volume filters. Used for held positions that
+    dropped out of the scanner universe due to low volume.
+
+    Returns the same dict as compute_turtle_stats, or None if not enough data.
+    """
+    try:
+        df = _fetch_candles_for_product(client, product_id, CANDLE_HISTORY_DAYS)
+    except CoinbaseClientError as exc:
+        logger.warning("Failed to fetch candles for %s: %s", product_id, exc)
+        return None
+    if df is None or df.empty:
+        return None
+    if len(df) < MIN_CANDLES_REQUIRED:
+        return None
+    return compute_turtle_stats(df)
+
+
 # ---------------------------------------------------------------------------
 # Pretty-print tables (human-only side effect)
 # ---------------------------------------------------------------------------
