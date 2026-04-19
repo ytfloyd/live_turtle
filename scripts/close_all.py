@@ -1,8 +1,8 @@
 """
 scripts/close_all.py
 
-Emergency close: sells 100% of every open crypto position at market
-and cancels all resting stop-loss orders.
+Emergency close: cancels all resting orders per asset (freeing held
+balances), then sells 100% of every open crypto position at market.
 
 Usage:
     uv run python scripts/close_all.py              # dry-run (shows what would be sold)
@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 import uuid
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
@@ -71,29 +72,40 @@ def main() -> int:
         print("  Aborted.")
         return 0
 
-    # 2) Cancel ALL open orders first (stops, limits, everything).
-    print("\n  Cancelling all open orders...")
-    try:
-        open_orders = client.list_orders(order_status=["OPEN"])
-        if open_orders:
-            order_ids = [o["order_id"] for o in open_orders if "order_id" in o]
-            if order_ids:
-                client.cancel_orders(order_ids)
-                print(f"  Cancelled {len(order_ids)} open order(s)")
-        else:
-            print("  No open orders to cancel")
-    except CoinbaseClientError as exc:
-        print(f"  WARNING: cancel failed: {exc} — continuing with sells")
-
-    # 3) Sell every position at market.
-    print(f"\n  Selling {len(holdings)} position(s)...")
     audit = AuditStore(DEFAULT_AUDIT_DB_PATH)
     success_count = 0
 
     for currency, held_amount in sorted(holdings.items()):
         exec_pid = f"{currency}-USDC"
 
-        # Fetch product details for base_size rounding.
+        # a) Cancel any open orders for this product (frees held balances).
+        try:
+            open_orders = client.list_orders(
+                product_id=exec_pid,
+                order_status=["OPEN"],
+            )
+            if open_orders:
+                order_ids = [o["order_id"] for o in open_orders if "order_id" in o]
+                if order_ids:
+                    client.cancel_orders(order_ids)
+                    print(f"  {currency:12s}  cancelled {len(order_ids)} order(s)")
+                    time.sleep(0.5)
+        except CoinbaseClientError as exc:
+            logger.warning("Cancel failed for %s: %s — trying sell anyway", exec_pid, exc)
+
+        # b) Re-read available balance after cancellation.
+        try:
+            fresh_accounts = client.get_accounts()
+            fresh_holdings = parse_holdings(fresh_accounts)
+            sell_amount = fresh_holdings.get(currency, Decimal("0"))
+        except CoinbaseClientError:
+            sell_amount = held_amount
+
+        if sell_amount <= 0:
+            print(f"  {currency:12s}  SKIP — no available balance after cancel")
+            continue
+
+        # c) Fetch product details for rounding.
         try:
             details = client.get_product_details(exec_pid)
             base_inc = Decimal(str(details["base_increment"]))
@@ -101,11 +113,12 @@ def main() -> int:
             print(f"  {currency:12s}  ERROR fetching details: {exc}")
             continue
 
-        base_size = _floor_to_increment(held_amount, base_inc)
+        base_size = _floor_to_increment(sell_amount, base_inc)
         if base_size <= 0:
             print(f"  {currency:12s}  SKIP — rounds to 0")
             continue
 
+        # d) Market sell.
         sell_order_id = f"turtle-closeall-{uuid.uuid4().hex}"
         row_id = audit.insert_intent(
             product_id=f"{currency}-USD",
@@ -123,7 +136,7 @@ def main() -> int:
             )
         except CoinbaseClientError as exc:
             audit.update_status(row_id, status="errored", error_text=str(exc))
-            print(f"  {currency:12s}  ERROR: {exc}")
+            print(f"  {currency:12s}  SELL ERROR: {exc}")
             continue
 
         if isinstance(response, dict) and response.get("success") is not False:

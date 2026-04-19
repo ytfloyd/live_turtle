@@ -337,7 +337,9 @@ class CoinbaseClient:
         if product_id:
             params["product_id"] = product_id
         if order_status:
-            params["order_status"] = order_status
+            # Coinbase expects repeated params: ?order_status=OPEN&order_status=PENDING
+            # requests handles this with a list value.
+            params["order_status"] = ",".join(order_status)
         if retail_portfolio_id:
             params["retail_portfolio_id"] = retail_portfolio_id
         payload = self._signed_get(PRIVATE_ORDERS_PATH, params=params)
