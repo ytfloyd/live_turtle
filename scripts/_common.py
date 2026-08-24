@@ -94,6 +94,35 @@ def parse_holdings(accounts: list[dict]) -> dict[str, "Decimal"]:
     return holdings
 
 
+def available_cash(accounts: list[dict]) -> "Decimal":
+    """
+    Sum spendable USD + USDC across accounts.
+
+    Counts only `available_balance` — deliberately excludes `hold`, since held
+    cash is already committed to a resting order and cannot fund a new buy.
+    """
+    from decimal import Decimal
+
+    _CASH = frozenset({"USD", "USDC"})
+    total = Decimal("0")
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        bal = account.get("available_balance")
+        if not isinstance(bal, dict):
+            continue
+        if bal.get("currency") not in _CASH:
+            continue
+        value_raw = bal.get("value")
+        if value_raw is None:
+            continue
+        try:
+            total += Decimal(str(value_raw))
+        except (ArithmeticError, ValueError):
+            continue
+    return total
+
+
 def fetch_product_details_bulk(
     client: CoinbaseClient, product_ids: list[str]
 ) -> dict[str, dict]:

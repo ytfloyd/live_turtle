@@ -18,11 +18,13 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _common import (  # noqa: E402
+    available_cash,
     configure_logging,
     fetch_product_details_bulk,
     load_cdp_key_or_die,
@@ -31,7 +33,7 @@ from _common import (  # noqa: E402
 
 from turtle_crypto.audit import AuditStore  # noqa: E402
 from turtle_crypto.coinbase_client import CoinbaseClient  # noqa: E402
-from turtle_crypto.config import DEFAULT_AUDIT_DB_PATH  # noqa: E402
+from turtle_crypto.config import CASH_BUFFER_PCT, DEFAULT_AUDIT_DB_PATH  # noqa: E402
 from turtle_crypto.executor import (  # noqa: E402
     CapViolation,
     Executor,
@@ -152,12 +154,41 @@ def main() -> int:
     # Filter out assets already in the portfolio.
     all_orders = executor.filter_already_held(all_orders)
 
+    # Trim to what available cash can actually fund. The trade sheet sizes
+    # against ACCOUNT_SIZE, which ignores how much is already deployed — so
+    # once the book is partly full it will propose more than we can pay for
+    # and the tail orders die with INSUFFICIENT_FUND (tripping the halt).
+    # Orders are already ranked, so we drop from the bottom, same as the
+    # heat cap does.
+    cash = available_cash(client.get_accounts())
+    budget = cash * (Decimal("1") - CASH_BUFFER_PCT)
+    affordable: list[TradeOrder] = []
+    running = Decimal("0")
+    dropped: list[tuple[str, Decimal]] = []
+    for o in all_orders:
+        if running + o.notional_usd > budget:
+            dropped.append((o.asset, o.notional_usd))
+            continue
+        affordable.append(o)
+        running += o.notional_usd
+
+    if dropped:
+        logger.warning(
+            "Cash guard: $%.2f available, $%.2f budget after %.0f%% buffer — "
+            "dropped %d order(s): %s",
+            cash, budget, CASH_BUFFER_PCT * 100, len(dropped),
+            ", ".join(f"{a} (${n:,.0f})" for a, n in dropped),
+        )
+    all_orders = affordable
+
     if not all_orders:
-        print("\nNo new orders to execute (all signals already held or none active).")
+        print("\nNo new orders to execute (all signals already held, "
+              "unaffordable, or none active).")
         audit.close()
         return 0
 
     print(f"\n=== LIVE EXECUTION — {len(all_orders)} NEW ORDER(S) TO PROCESS ===")
+    print(f"  available cash ${cash:,.2f}   budget ${budget:,.2f}")
 
     # Show all orders as a summary table first.
     from tabulate import tabulate as _tabulate

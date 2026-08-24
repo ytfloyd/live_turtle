@@ -112,6 +112,12 @@ BUY_STOP_TRIGGER_CHANNEL_PCT: Decimal = Decimal("85")
 # WATCH range lower bound: S1 channel % >= 75.
 WATCH_CHANNEL_PCT: Decimal = Decimal("75")
 
+# Fraction of available cash held back when sizing a batch of entries.
+# Covers taker fees (~0.6%) plus market-order slippage between the trade
+# sheet's price and the actual fill. Without this the last order in a batch
+# reliably fails with INSUFFICIENT_FUND and trips the halt flag.
+CASH_BUFFER_PCT: Decimal = Decimal("0.03")
+
 # Slippage tolerance on stop-loss sell orders: limit = stop * (1 - slippage).
 # 0.5% below stop to ensure fills on fast drops.
 STOP_LOSS_SLIPPAGE: Decimal = Decimal("0.005")
