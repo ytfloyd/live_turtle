@@ -55,3 +55,7 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+# launchd runner artifacts
+logs/
+data/.last_run_utc
